@@ -1,0 +1,10 @@
+# CMake and compiler output
+/build/
+
+# RocksDB runtime data
+/data/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
