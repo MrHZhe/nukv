@@ -1,0 +1,3 @@
+[submodule "third_party/NuRaft"]
+	path = third_party/NuRaft
+	url = https://github.com/eBay/NuRaft.git
