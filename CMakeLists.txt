@@ -98,3 +98,62 @@ add_test(
     NAME rocks_kv_store_test
     COMMAND rocks_kv_store_test
 )
+
+find_package(Protobuf REQUIRED)
+
+add_library(
+    nukv_proto
+    proto/command.proto
+)
+
+protobuf_generate(
+    TARGET nukv_proto
+    LANGUAGE cpp
+    IMPORT_DIRS ${PROJECT_SOURCE_DIR}/proto
+)
+
+target_include_directories(
+    nukv_proto
+    PUBLIC
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+target_link_libraries(
+    nukv_proto
+    PUBLIC
+    protobuf::libprotobuf
+)
+
+add_executable(
+    command_proto_test
+    tests/command_proto_test.cpp
+)
+
+target_link_libraries(
+    command_proto_test
+    PRIVATE
+    nukv_proto
+)
+
+add_test(
+    NAME command_proto_test
+    COMMAND command_proto_test
+)
+
+add_library(
+    nukv_command
+    src/command_applier.cpp
+)
+
+target_include_directories(
+    nukv_command
+    PUBLIC
+    ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(
+    nukv_command
+    PUBLIC
+    nukv_storage
+    nukv_proto
+)

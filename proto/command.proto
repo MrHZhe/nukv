@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package nukv.proto;
+
+enum CommandType
+{
+    COMMAND_TYPE_UNSPECIFIED = 0;
+    COMMAND_TYPE_PUT = 1;
+    COMMAND_TYPE_GET = 2;
+    COMMAND_TYPE_DELETE = 3;
+}
+
+message Command
+{
+    CommandType type = 1;
+    uint64 client_id = 2;
+    uint64 request_id = 3;
+    bytes key = 4;
+    bytes value = 5;
+}
