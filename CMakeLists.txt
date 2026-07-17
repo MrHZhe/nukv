@@ -157,3 +157,37 @@ target_link_libraries(
     nukv_storage
     nukv_proto
 )
+
+add_library(
+    nukv_raft
+    src/raft_state_machine.cpp
+)
+
+target_include_directories(
+    nukv_raft
+    PUBLIC
+    ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(
+    nukv_raft
+    PUBLIC
+    nukv_command
+    NuRaft::static_lib
+)
+
+add_executable(
+    raft_state_machine_test
+    tests/raft_state_machine_test.cpp
+)
+
+target_link_libraries(
+    raft_state_machine_test
+    PRIVATE
+    nukv_raft
+)
+
+add_test(
+    NAME raft_state_machine_test
+    COMMAND raft_state_machine_test
+)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "nukv/storage/rocks_kv_store.hpp"
-#include "proto/command.pb.h"
+#include "command.pb.h"
 
 namespace nukv
 {
@@ -13,5 +13,5 @@ public:
     void Apply(const proto::Command& command);
 private:
     RocksKVStore& store_;
-}
+};
 }
