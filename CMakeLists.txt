@@ -161,6 +161,7 @@ target_link_libraries(
 add_library(
     nukv_raft
     src/raft_state_machine.cpp
+    src/raft_state_manager.cpp
 )
 
 target_include_directories(
