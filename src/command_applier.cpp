@@ -3,8 +3,8 @@
 #include <stdexcept>
 namespace nukv
 {
-explicit CommandApplier::CommandApplier(RocksKVStore& store)
-    srore_(store)
+CommandApplier::CommandApplier(RocksKVStore& store)
+    : store_(store)
 {}
 
 void CommandApplier::Apply(const proto::Command& command)

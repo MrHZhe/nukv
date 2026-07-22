@@ -13,5 +13,5 @@ public:
     void Apply(const proto::Command& command);
 private:
     RocksKVStore& store_;
-}
+};
 }
