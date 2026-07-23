@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <mutex>
 
 namespace nukv
 {
@@ -28,6 +29,8 @@ public:
 
     void system_exit(const int exit_code) override;
 private:
+    std::mutex mutex_;
+
     int32_t server_id_;
 
     std::string endpoint_;
@@ -35,5 +38,7 @@ private:
     nuraft::ptr<nuraft::srv_state> state_;
 
     nuraft::ptr<nuraft::cluster_config> cluster_config_;
+
+    nuraft::ptr<nuraft::log_store> log_store_;
 };
 }

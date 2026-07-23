@@ -1,4 +1,4 @@
-#include <command.pb.h>
+#include <proto/command.pb.h>
 
 #include <cassert>
 #include <iostream>

@@ -162,6 +162,7 @@ add_library(
     nukv_raft
     src/raft_state_machine.cpp
     src/raft_state_manager.cpp
+    src/raft_log_store.cpp
 )
 
 target_include_directories(
@@ -191,4 +192,20 @@ target_link_libraries(
 add_test(
     NAME raft_state_machine_test
     COMMAND raft_state_machine_test
+)
+
+add_executable(
+    raft_log_store_test
+    tests/raft_log_store_test.cpp
+)
+
+target_link_libraries(
+    raft_log_store_test
+    PRIVATE
+    nukv_raft
+)
+
+add_test(
+    NAME raft_log_store_test
+    COMMAND raft_log_store_test
 )
