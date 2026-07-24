@@ -2,18 +2,34 @@ cmake_minimum_required(VERSION 3.26)
 
 project(nukv LANGUAGES CXX)
 
+# ============================================================
+# 全局 C++ 配置
+# ============================================================
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# NuRaft's examples and tests have already been verified separately.
+# 关闭 NuRaft 自己的示例和测试。
+# NuRaft 已经单独验证过，这里只构建库。
 set(BUILD_EXAMPLES OFF)
 set(BUILD_TESTING OFF)
+
+# ============================================================
+# NuRaft
+# ============================================================
 
 add_subdirectory(
     third_party/NuRaft
     third_party/NuRaft-build
 )
+
+# ============================================================
+# 通用依赖
+# ============================================================
+
+find_package(Threads REQUIRED)
+find_package(Protobuf REQUIRED)
 
 find_path(
     ROCKSDB_INCLUDE_DIR
@@ -26,6 +42,10 @@ find_library(
     NAMES rocksdb
     REQUIRED
 )
+
+# ============================================================
+# RocksDB 基础验证程序
+# ============================================================
 
 add_executable(
     rocksdb_smoke
@@ -42,7 +62,7 @@ target_link_libraries(
     rocksdb_smoke
     PRIVATE
     ${ROCKSDB_LIBRARY}
-    pthread
+    Threads::Threads
 )
 
 add_executable(
@@ -60,8 +80,12 @@ target_link_libraries(
     rocksdb_read
     PRIVATE
     ${ROCKSDB_LIBRARY}
-    pthread
+    Threads::Threads
 )
+
+# ============================================================
+# RocksDB KV 存储模块
+# ============================================================
 
 add_library(
     nukv_storage
@@ -72,14 +96,21 @@ target_include_directories(
     nukv_storage
     PUBLIC
     ${PROJECT_SOURCE_DIR}/include
+
+    PRIVATE
+    ${ROCKSDB_INCLUDE_DIR}
 )
 
 target_link_libraries(
     nukv_storage
     PUBLIC
     ${ROCKSDB_LIBRARY}
-    pthread
+    Threads::Threads
 )
+
+# ============================================================
+# 项目测试支持
+# ============================================================
 
 enable_testing()
 
@@ -99,7 +130,9 @@ add_test(
     COMMAND rocks_kv_store_test
 )
 
-find_package(Protobuf REQUIRED)
+# ============================================================
+# Protobuf 命令协议
+# ============================================================
 
 add_library(
     nukv_proto
@@ -112,6 +145,15 @@ protobuf_generate(
     IMPORT_DIRS ${PROJECT_SOURCE_DIR}/proto
 )
 
+# 生成文件位置：
+#
+# build/proto/command.pb.h
+# build/proto/command.pb.cc
+#
+# 源代码中统一使用：
+#
+# #include "proto/command.pb.h"
+#
 target_include_directories(
     nukv_proto
     PUBLIC
@@ -135,10 +177,20 @@ target_link_libraries(
     nukv_proto
 )
 
+# command_proto_test 编译时需要使用生成的 command.pb.h。
+add_dependencies(
+    command_proto_test
+    nukv_proto
+)
+
 add_test(
     NAME command_proto_test
     COMMAND command_proto_test
 )
+
+# ============================================================
+# CommandApplier 模块
+# ============================================================
 
 add_library(
     nukv_command
@@ -158,11 +210,23 @@ target_link_libraries(
     nukv_proto
 )
 
+# 防止并行全量构建时：
+# command_applier.cpp 已开始编译，但 command.pb.h 尚未生成。
+add_dependencies(
+    nukv_command
+    nukv_proto
+)
+
+# ============================================================
+# Raft 模块
+# ============================================================
+
 add_library(
     nukv_raft
     src/raft_state_machine.cpp
     src/raft_state_manager.cpp
     src/raft_log_store.cpp
+    src/raft_node.cpp
 )
 
 target_include_directories(
@@ -178,6 +242,16 @@ target_link_libraries(
     NuRaft::static_lib
 )
 
+# raft_state_machine.cpp 间接或直接使用生成的 Protobuf 头文件。
+add_dependencies(
+    nukv_raft
+    nukv_proto
+)
+
+# ============================================================
+# RaftStateMachine 测试
+# ============================================================
+
 add_executable(
     raft_state_machine_test
     tests/raft_state_machine_test.cpp
@@ -189,10 +263,19 @@ target_link_libraries(
     nukv_raft
 )
 
+add_dependencies(
+    raft_state_machine_test
+    nukv_proto
+)
+
 add_test(
     NAME raft_state_machine_test
     COMMAND raft_state_machine_test
 )
+
+# ============================================================
+# RaftLogStore 测试
+# ============================================================
 
 add_executable(
     raft_log_store_test
@@ -205,7 +288,24 @@ target_link_libraries(
     nukv_raft
 )
 
+add_dependencies(
+    raft_log_store_test
+    nukv_proto
+)
+
 add_test(
     NAME raft_log_store_test
     COMMAND raft_log_store_test
 )
+
+add_executable(
+    nukv_server
+    src/main.cpp
+)
+
+target_link_libraries(
+    nukv_server
+    PRIVATE
+    nukv_raft
+)
+

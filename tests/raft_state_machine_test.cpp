@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <string>
 
-#include "proto/command.pb.h"
+#include "command.pb.h"
 
 namespace {
 

@@ -9,9 +9,9 @@
 #include "nukv/raft_state_manager.hpp"
 #include "nukv/storage/rocks_kv_store.hpp"
 
-namespace nukv final
+namespace nukv
 {
-class RaftNode
+class RaftNode final
 {
 public:
     RaftNode(

@@ -1,5 +1,5 @@
 #include "nukv/raft_state_machine.hpp"
-#include <proto/command.pb.h>
+#include <command.pb.h>
 
 #include <cstddef>
 #include <exception>
