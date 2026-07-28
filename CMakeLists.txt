@@ -10,8 +10,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 关闭 NuRaft 自己的示例和测试。
-# NuRaft 已经单独验证过，这里只构建库。
+# 关闭 NuRaft 自带的示例和测试。
 set(BUILD_EXAMPLES OFF)
 set(BUILD_TESTING OFF)
 
@@ -25,11 +24,11 @@ add_subdirectory(
 )
 
 # ============================================================
-# 通用依赖
+# 第三方依赖
 # ============================================================
 
 find_package(Threads REQUIRED)
-find_package(Protobuf REQUIRED)
+find_package(Protobuf REQUIRED MODULE)
 
 find_path(
     ROCKSDB_INCLUDE_DIR
@@ -109,7 +108,7 @@ target_link_libraries(
 )
 
 # ============================================================
-# 项目测试支持
+# 测试支持
 # ============================================================
 
 enable_testing()
@@ -134,30 +133,49 @@ add_test(
 # Protobuf 命令协议
 # ============================================================
 
-add_library(
-    nukv_proto
-    proto/command.proto
+set(
+    NUKV_PROTO_SOURCE_DIR
+    "${PROJECT_SOURCE_DIR}/proto"
+)
+
+set(
+    NUKV_PROTO_GENERATED_DIR
+    "${PROJECT_BINARY_DIR}/proto"
+)
+
+file(
+    MAKE_DIRECTORY
+    "${NUKV_PROTO_GENERATED_DIR}"
 )
 
 protobuf_generate(
-    TARGET nukv_proto
     LANGUAGE cpp
-    IMPORT_DIRS ${PROJECT_SOURCE_DIR}/proto
+
+    PROTOS
+    "${NUKV_PROTO_SOURCE_DIR}/command.proto"
+
+    IMPORT_DIRS
+    "${NUKV_PROTO_SOURCE_DIR}"
+
+    PROTOC_OUT_DIR
+    "${NUKV_PROTO_GENERATED_DIR}"
+
+    APPEND_PATH
+
+    OUT_VAR
+    NUKV_PROTO_GENERATED_FILES
 )
 
-# 生成文件位置：
-#
-# build/proto/command.pb.h
-# build/proto/command.pb.cc
-#
-# 源代码中统一使用：
-#
-# #include "proto/command.pb.h"
-#
+add_library(
+    nukv_proto
+    STATIC
+    ${NUKV_PROTO_GENERATED_FILES}
+)
+
 target_include_directories(
     nukv_proto
     PUBLIC
-    ${CMAKE_CURRENT_BINARY_DIR}
+    "${NUKV_PROTO_GENERATED_DIR}"
 )
 
 target_link_libraries(
@@ -165,6 +183,10 @@ target_link_libraries(
     PUBLIC
     protobuf::libprotobuf
 )
+
+# ============================================================
+# Protobuf 测试
+# ============================================================
 
 add_executable(
     command_proto_test
@@ -177,7 +199,8 @@ target_link_libraries(
     nukv_proto
 )
 
-# command_proto_test 编译时需要使用生成的 command.pb.h。
+# command_proto_test 直接包含 command.pb.h，
+# 明确保证生成文件先完成。
 add_dependencies(
     command_proto_test
     nukv_proto
@@ -210,8 +233,8 @@ target_link_libraries(
     nukv_proto
 )
 
-# 防止并行全量构建时：
-# command_applier.cpp 已开始编译，但 command.pb.h 尚未生成。
+# command_applier.hpp 直接包含 command.pb.h，
+# 明确保证生成文件先完成。
 add_dependencies(
     nukv_command
     nukv_proto
@@ -242,10 +265,24 @@ target_link_libraries(
     NuRaft::static_lib
 )
 
-# raft_state_machine.cpp 间接或直接使用生成的 Protobuf 头文件。
 add_dependencies(
     nukv_raft
     nukv_proto
+)
+
+# ============================================================
+# NuKV 服务程序
+# ============================================================
+
+add_executable(
+    nukv_server
+    src/main.cpp
+)
+
+target_link_libraries(
+    nukv_server
+    PRIVATE
+    nukv_raft
 )
 
 # ============================================================
@@ -297,15 +334,3 @@ add_test(
     NAME raft_log_store_test
     COMMAND raft_log_store_test
 )
-
-add_executable(
-    nukv_server
-    src/main.cpp
-)
-
-target_link_libraries(
-    nukv_server
-    PRIVATE
-    nukv_raft
-)
-

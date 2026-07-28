@@ -29,6 +29,8 @@ public:
     void Start();
 
     void Stop();
+
+    bool IsLeader() const;
 private:
     int32_t server_id_;
 

@@ -2,6 +2,8 @@
 
 #include <filesystem>
 #include <iostream>
+#include <thread>
+#include <chrono>
 
 int main()
 {
@@ -17,6 +19,21 @@ int main()
         );
 
         node.Start();
+
+        for (int i = 0; i < 30 && !node.IsLeader(); ++i)
+        {
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(100)
+            );
+        }
+        if (node.IsLeader())
+        {
+            std::cout << "This node is the Leader." << std::endl;
+        }
+        else
+        {
+            std::cout << "Leader election timed out." << std::endl;
+        }
 
         std::cout
             << "NuKV node started successfully.\n"

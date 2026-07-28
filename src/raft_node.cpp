@@ -86,4 +86,13 @@ namespace nukv
             );
         }
     }
+
+    bool RaftNode::IsLeader() const
+    {
+        if(!raft_server_)
+        {
+            return false;
+        }
+        return raft_server_->is_leader();
+    }
 }
