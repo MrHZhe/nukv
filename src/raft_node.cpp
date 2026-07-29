@@ -1,9 +1,11 @@
 #include "nukv/raft_node.hpp"
+#include "command.pb.h"
 
 #include <utility>
 #include <chrono>
 #include <stdexcept>
 #include <thread>
+#include <cstring>
 
 namespace nukv
 {
@@ -94,5 +96,39 @@ namespace nukv
             return false;
         }
         return raft_server_->is_leader();
+    }
+
+    bool RaftNode::Submit(const proto::Command& command)
+    {
+        if (!raft_server_ || !raft_server_->is_leader())
+        {
+            return false;
+        }
+
+        std::string serialized_command;
+
+        if (!command.SerializeToString(&serialized_command))
+        {
+            return false;
+        }
+
+        auto log = nuraft::buffer::alloc(serialized_command.size());
+
+        std::memcpy(
+            log->data_begin(),
+            serialized_command.data(),
+            serialized_command.size()
+        );
+
+        log->pos(0);
+
+        auto result = raft_server_->append_entries({log});
+
+        return result && result->get_result_code() == nuraft::cmd_result_code::OK;
+    }
+
+    std::optional<std::string> RaftNode::GetLocal(const std::string& key) const
+    {
+        return store_.Get(key);
     }
 }

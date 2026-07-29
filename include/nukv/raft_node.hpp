@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <optional>
 
 #include "nukv/raft_state_machine.hpp"
 #include "nukv/raft_state_manager.hpp"
@@ -11,6 +12,11 @@
 
 namespace nukv
 {
+namespace proto
+{
+class Command;
+}
+
 class RaftNode final
 {
 public:
@@ -31,6 +37,10 @@ public:
     void Stop();
 
     bool IsLeader() const;
+
+    bool Submit(const proto::Command& command);
+
+    std::optional<std::string> GetLocal(const std::string& key) const;
 private:
     int32_t server_id_;
 

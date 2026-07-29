@@ -1,9 +1,12 @@
 #include "nukv/raft_node.hpp"
+#include "command.pb.h"
 
+#include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
+#include <string>
 #include <thread>
-#include <chrono>
 
 int main()
 {
@@ -26,21 +29,93 @@ int main()
                 std::chrono::milliseconds(100)
             );
         }
+
         if (node.IsLeader())
         {
-            std::cout << "This node is the Leader." << std::endl;
+            std::cout
+                << "This node is the Leader."
+                << std::endl;
         }
         else
         {
-            std::cout << "Leader election timed out." << std::endl;
+            std::cout
+                << "Leader election timed out."
+                << std::endl;
         }
 
         std::cout
-            << "NuKV node started successfully.\n"
-            << "Press Enter to stop..."
+            << "NuKV node started successfully."
             << std::endl;
 
-        std::cin.get();
+        std::cout
+            << "Commands: put <key> <value>, exit"
+            << std::endl;
+
+        std::string line;
+
+        while (true)
+        {
+            std::cout << "nukv> " << std::flush;
+
+            if (!std::getline(std::cin, line))
+            {
+                break;
+            }
+
+            std::istringstream input(line);
+
+            std::string operation;
+            input >> operation;
+
+            if (operation.empty())
+            {
+                continue;
+            }
+
+            if (operation == "exit")
+            {
+                break;
+            }
+
+            if (operation == "put")
+            {
+                std::string key;
+                std::string value;
+
+                if (!(input >> key >> value))
+                {
+                    std::cout
+                        << "Usage: put <key> <value>"
+                        << std::endl;
+
+                    continue;
+                }
+
+                nukv::proto::Command command;
+                command.set_type(
+                    nukv::proto::COMMAND_TYPE_PUT
+                );
+                command.set_key(key);
+                command.set_value(value);
+
+                if (node.Submit(command))
+                {
+                    std::cout << "OK" << std::endl;
+                }
+                else
+                {
+                    std::cout
+                        << "PUT failed: this node may not be Leader"
+                        << std::endl;
+                }
+            }
+            else
+            {
+                std::cout
+                    << "Unknown command"
+                    << std::endl;
+            }
+        }
 
         node.Stop();
 
