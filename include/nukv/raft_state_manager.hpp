@@ -5,15 +5,22 @@
 #include <cstdint>
 #include <string>
 #include <mutex>
+#include <vector>
 
 namespace nukv
 {
 class RaftLogStore;
 
+struct RaftPeer
+{
+    int32_t id;
+    std::string endpoint;
+};
+
 class RaftStateManager final : public  nuraft::state_mgr
 {
 public:
-    explicit RaftStateManager(int32_t server_id,std::string endpoint);
+    explicit RaftStateManager(int32_t current_server_id,std::vector<RaftPeer> peers);
 
     nuraft::ptr<nuraft::cluster_config> load_config() override;
 
@@ -32,8 +39,6 @@ private:
     std::mutex mutex_;
 
     int32_t server_id_;
-
-    std::string endpoint_;
 
     nuraft::ptr<nuraft::srv_state> state_;
 

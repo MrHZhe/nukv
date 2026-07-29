@@ -48,7 +48,11 @@ int main()
             << std::endl;
 
         std::cout
-            << "Commands: put <key> <value>, exit"
+            << "Commands: "
+            << "put <key> <value>, "
+            << "get <key>, "
+            << "del <key>, "
+            << "exit"
             << std::endl;
 
         std::string line;
@@ -106,6 +110,64 @@ int main()
                 {
                     std::cout
                         << "PUT failed: this node may not be Leader"
+                        << std::endl;
+                }
+            }
+            else if (operation == "get")
+            {
+                std::string key;
+
+                if (!(input >> key))
+                {
+                    std::cout
+                        << "Usage: get <key>"
+                        << std::endl;
+
+                    continue;
+                }
+
+                const auto value = node.GetLocal(key);
+
+                if (value.has_value())
+                {
+                    std::cout
+                        << value.value()
+                        << std::endl;
+                }
+                else
+                {
+                    std::cout
+                        << "NOT_FOUND"
+                        << std::endl;
+                }
+            }
+            else if (operation == "del")
+            {
+                std::string key;
+
+                if (!(input >> key))
+                {
+                    std::cout
+                        << "Usage: del <key>"
+                        << std::endl;
+
+                    continue;
+                }
+
+                nukv::proto::Command command;
+                command.set_type(
+                    nukv::proto::COMMAND_TYPE_DELETE
+                );
+                command.set_key(key);
+
+                if (node.Submit(command))
+                {
+                    std::cout << "OK" << std::endl;
+                }
+                else
+                {
+                    std::cout
+                        << "DELETE failed: this node may not be Leader"
                         << std::endl;
                 }
             }

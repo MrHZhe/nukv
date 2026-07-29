@@ -6,16 +6,18 @@
 
 namespace nukv {
 
-RaftStateManager::RaftStateManager(int32_t server_id,std::string endpoint)
-    : server_id_(server_id)
-    , endpoint_(std::move(endpoint))
+RaftStateManager::RaftStateManager(int32_t current_server_id,std::vector<RaftPeer> peers)
+    : server_id_(current_server_id)
     , state_(nullptr)
     , cluster_config_(nuraft::cs_new<nuraft::cluster_config>())
     , log_store_(nuraft::cs_new<RaftLogStore>())
 {
-    auto self_config = nuraft::cs_new<nuraft::srv_config>(server_id_,endpoint_);
+    for(RaftPeer &peer : peers)
+    {
+        auto config = nuraft::cs_new<nuraft::srv_config>(peer.id,peer.endpoint);
 
-    cluster_config_->get_servers().push_back(self_config);
+        cluster_config_->get_servers().push_back(config);
+    }
 }
 
 nuraft::ptr<nuraft::cluster_config> RaftStateManager::load_config() 
