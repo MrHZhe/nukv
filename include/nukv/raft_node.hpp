@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <optional>
+#include <vector>
 
 #include "nukv/raft_state_machine.hpp"
 #include "nukv/raft_state_manager.hpp"
@@ -24,7 +25,8 @@ public:
         int32_t server_id,
         std::string endpoint,
         int32_t listen_port,
-        std::string db_path
+        std::string db_path,
+        std::vector<RaftPeer> peers
     );
 
     ~RaftNode();

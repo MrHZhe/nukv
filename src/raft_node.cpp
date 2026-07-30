@@ -13,13 +13,14 @@ namespace nukv
         (int32_t server_id,
         std::string endpoint,
         int32_t listen_port,
-        std::string db_path)
+        std::string db_path,
+        std::vector<RaftPeer> peers)
         : server_id_(server_id)
         , endpoint_(std::move(endpoint))
         , listen_port_(listen_port)
         , store_(db_path)
         , state_machine_(nuraft::cs_new<RaftStateMachine>(store_))
-        , state_manager_(nuraft::cs_new<RaftStateManager>(server_id_,endpoint_))
+        , state_manager_(nuraft::cs_new<RaftStateManager>(server_id_,std::move(peers)))
         , launcher_()
         , raft_server_(nullptr)
     {}

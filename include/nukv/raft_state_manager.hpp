@@ -1,6 +1,7 @@
 #pragma once
 
 #include <libnuraft/nuraft.hxx>
+#include "nukv/storage/rocks_kv_store.hpp"
 
 #include <cstdint>
 #include <string>
@@ -20,7 +21,7 @@ struct RaftPeer
 class RaftStateManager final : public  nuraft::state_mgr
 {
 public:
-    explicit RaftStateManager(int32_t current_server_id,std::vector<RaftPeer> peers);
+    explicit RaftStateManager(int32_t current_server_id,std::vector<RaftPeer> peers,std::string metadata_path);
 
     nuraft::ptr<nuraft::cluster_config> load_config() override;
 
@@ -39,6 +40,8 @@ private:
     std::mutex mutex_;
 
     int32_t server_id_;
+
+    RocksKVStore metadata_store_;
 
     nuraft::ptr<nuraft::srv_state> state_;
 

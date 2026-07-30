@@ -3,16 +3,18 @@
 
 #include <cstdlib>
 #include <utility>
+#include <cstring>
 
 namespace nukv {
 
-RaftStateManager::RaftStateManager(int32_t current_server_id,std::vector<RaftPeer> peers)
+RaftStateManager::RaftStateManager(int32_t current_server_id,std::vector<RaftPeer> peers,std::string metadata_path)
     : server_id_(current_server_id)
+    , metadata_store_(std::move(metadata_path))
     , state_(nullptr)
     , cluster_config_(nuraft::cs_new<nuraft::cluster_config>())
     , log_store_(nuraft::cs_new<RaftLogStore>())
 {
-    for(RaftPeer &peer : peers)
+    for(const RaftPeer &peer : peers)
     {
         auto config = nuraft::cs_new<nuraft::srv_config>(peer.id,peer.endpoint);
 
@@ -61,7 +63,11 @@ void RaftStateManager::save_state(const nuraft::srv_state& state)
         return;
     }
 
+    const std::string serialized_state(reinterpret_cast<const char*>(buffer->data_begin()),buffer->size());
+
     std::lock_guard<std::mutex> lock(mutex_);
+
+    metadata_store_.Put("__raft/state",serialized_state);
 
     state_ = std::move(new_state);
 }
@@ -72,7 +78,29 @@ nuraft::ptr<nuraft::srv_state> RaftStateManager::read_state()
 
     if (!state_)
     {
-        return nullptr;
+        const auto serialized_state = metadata_store_.Get("__raft/state");
+
+        if (!serialized_state.has_value())
+        {
+            return nullptr;
+        }
+
+        auto buffer = nuraft::buffer::alloc(serialized_state->size());
+
+        std::memcpy(
+            buffer->data_begin(),
+            serialized_state->data(),
+            serialized_state->size()
+        );
+
+        buffer->pos(0);
+
+        state_ = nuraft::srv_state::deserialize(*buffer);
+
+        if (!state_)
+        {
+            return nullptr;
+        }
     }
 
     auto buffer = state_->serialize();
