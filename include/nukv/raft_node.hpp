@@ -26,6 +26,7 @@ public:
         std::string endpoint,
         int32_t listen_port,
         std::string db_path,
+        std::string metadata_path,
         std::vector<RaftPeer> peers
     );
 

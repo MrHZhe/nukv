@@ -12,7 +12,7 @@ RaftStateManager::RaftStateManager(int32_t current_server_id,std::vector<RaftPee
     , metadata_store_(std::move(metadata_path))
     , state_(nullptr)
     , cluster_config_(nuraft::cs_new<nuraft::cluster_config>())
-    , log_store_(nuraft::cs_new<RaftLogStore>())
+    , log_store_(nuraft::cs_new<RaftLogStore>(metadata_store_))
 {
     for(const RaftPeer &peer : peers)
     {
@@ -26,9 +26,26 @@ nuraft::ptr<nuraft::cluster_config> RaftStateManager::load_config()
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (!cluster_config_)
+    const auto serialized_config = metadata_store_.Get("__raft/config");
+
+    if (serialized_config.has_value())
     {
-        return nullptr;
+        auto buffer = nuraft::buffer::alloc(serialized_config->size());
+
+        std::memcpy(
+            buffer->data_begin(),
+            serialized_config->data(),
+            serialized_config->size()
+        );
+
+        buffer->pos(0);
+
+        auto restored_config = nuraft::cluster_config::deserialize(*buffer);
+
+        if (restored_config)
+        {
+            cluster_config_ = std::move(restored_config);
+        }
     }
 
     auto buffer = cluster_config_->serialize();
@@ -47,7 +64,14 @@ void RaftStateManager::save_config(const nuraft::cluster_config& config)
         return;
     }
 
+    const std::string serialized_config(
+        reinterpret_cast<const char*>(buffer->data_begin()),
+        buffer->size()
+    );
+
     std::lock_guard<std::mutex> lock(mutex_);
+
+    metadata_store_.Put("__raft/config",serialized_config);
 
     cluster_config_ = std::move(new_config);
 }

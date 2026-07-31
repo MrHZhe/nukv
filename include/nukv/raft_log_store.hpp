@@ -1,6 +1,7 @@
 #pragma once
 
 #include <libnuraft/nuraft.hxx>
+#include "nukv/storage/rocks_kv_store.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +16,7 @@ namespace nukv
 class RaftLogStore final : public nuraft::log_store
 {
 public:
-    RaftLogStore();
+    explicit RaftLogStore(RocksKVStore& storage);
     ~RaftLogStore() override = default;
 
     RaftLogStore(const RaftLogStore&) = delete;
@@ -59,17 +60,20 @@ public:
     bool flush() override;
 
 private:
-    static nuraft::ptr<nuraft::log_entry> CloneEntry(
-        const nuraft::ptr<nuraft::log_entry>& entry);
+    static nuraft::ptr<nuraft::log_entry> CloneEntry(const nuraft::ptr<nuraft::log_entry>& entry);
 
     // 调用该函数前，调用者必须已经持有 mutex_。
     nuraft::ulong NextSlotUnlocked() const;
 
+    void PersistUnlocked();
+
+    void Restore();
+
+    RocksKVStore& storage_;
+
     mutable std::mutex mutex_;
 
-    std::map<
-        nuraft::ulong,
-        nuraft::ptr<nuraft::log_entry>> logs_;
+    std::map<nuraft::ulong,nuraft::ptr<nuraft::log_entry>> logs_;
 
     nuraft::ulong start_index_;
 };

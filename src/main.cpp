@@ -28,7 +28,8 @@ int main()
             1,
             "127.0.0.1:19001",
             19001,
-            "./data/node1",
+            "./data/node1/state_db",
+            "./data/node1/raft_meta",
             peers
         );
 
@@ -36,7 +37,8 @@ int main()
             2,
             "127.0.0.1:19002",
             19002,
-            "./data/node2",
+            "./data/node2/state_db",
+            "./data/node2/raft_meta",
             peers
         );
 
@@ -44,7 +46,8 @@ int main()
             3,
             "127.0.0.1:19003",
             19003,
-            "./data/node3",
+            "./data/node3/state_db",
+            "./data/node3/raft_meta",
             peers
         );
 
