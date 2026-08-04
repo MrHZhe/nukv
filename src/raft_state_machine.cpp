@@ -5,13 +5,42 @@
 #include <exception>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 namespace nukv
 {
 RaftStateMachine::RaftStateMachine(RocksKVStore& store)
-    : applier_(store)
+    : store_(store)
+    , applier_(store)
 {
+    const auto persisted_index = store_.Get("__raft/last_commit_index");
 
+    if (!persisted_index.has_value())
+    {
+        return;
+    }
+
+    std::size_t parsed_length = 0;
+
+    const unsigned long long restored_index =
+        std::stoull(
+            persisted_index.value(),
+            &parsed_length
+        );
+
+    if (parsed_length != persisted_index->size())
+    {
+        throw std::runtime_error(
+            "invalid persisted last commit index"
+        );
+    }
+
+    last_commit_index_.store(
+        static_cast<nuraft::ulong>(
+            restored_index
+        ),
+        std::memory_order_release
+    );
 }
 
 nuraft::ptr<nuraft::buffer> RaftStateMachine::commit(nuraft::ulong log_idx,nuraft::buffer& data)
@@ -34,7 +63,7 @@ nuraft::ptr<nuraft::buffer> RaftStateMachine::commit(nuraft::ulong log_idx,nuraf
         );
     }
 
-    applier_.Apply(command);
+    applier_.ApplyAtomically(command,log_idx);
 
     last_commit_index_.store(log_idx);
 

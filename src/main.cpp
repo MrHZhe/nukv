@@ -396,27 +396,29 @@ int main()
 
                 if (!(input >> key))
                 {
-                    std::cout
-                        << "Usage: get <key>"
-                        << std::endl;
-
+                    std::cout << "Usage: get <key>" << std::endl;
                     continue;
                 }
 
-                const auto value =
-                    leader->GetLocal(key);
+                nukv::proto::Command command;
+                command.set_type(nukv::proto::COMMAND_TYPE_GET);
+                command.set_key(key);
+
+                if (!leader->Submit(command))
+                {
+                    std::cout << "GET failed" << std::endl;
+                    continue;
+                }
+
+                const auto value = leader->GetLocal(key);
 
                 if (value.has_value())
                 {
-                    std::cout
-                        << value.value()
-                        << std::endl;
+                    std::cout << value.value() << std::endl;
                 }
                 else
                 {
-                    std::cout
-                        << "NOT_FOUND"
-                        << std::endl;
+                    std::cout << "NOT_FOUND" << std::endl;
                 }
             }
             else if (operation == "del")

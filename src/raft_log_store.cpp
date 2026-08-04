@@ -1,6 +1,8 @@
 #include "nukv/raft_log_store.hpp"
 
+#include <cstring>
 #include <stdexcept>
+
 
 namespace nukv
 {
@@ -645,20 +647,15 @@ void RaftLogStore::apply_pack(nuraft::ulong index,nuraft::buffer& pack)
         return;
     }
 
-    std::vector<nuraft::ptr<nuraft::log_entry>>
-        entries;
+    std::vector<nuraft::ptr<nuraft::log_entry>> entries;
 
-    entries.reserve(
-        static_cast<std::size_t>(count));
+    entries.reserve(static_cast<std::size_t>(count));
 
     // 先完整反序列化，全部成功后再修改 logs_，
     // 避免只应用一部分日志。
-    for (int32_t offset = 0;
-         offset < count;
-         ++offset)
+    for (int32_t offset = 0; offset < count; ++offset)
     {
-        const int32_t entry_size =
-            pack.get_int();
+        const int32_t entry_size = pack.get_int();
 
         if (entry_size <= 0)
         {
@@ -688,6 +685,11 @@ void RaftLogStore::apply_pack(nuraft::ulong index,nuraft::buffer& pack)
 
     const auto old_logs = logs_;
     const nuraft::ulong old_start_index = start_index_;
+
+    auto erase_begin = logs_.lower_bound(index);
+
+    logs_.erase(erase_begin,logs_.end());
+
 
     for (std::size_t offset = 0;
          offset < entries.size();

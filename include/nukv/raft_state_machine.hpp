@@ -18,6 +18,7 @@ public:
     void create_snapshot(nuraft::snapshot& snapshot,nuraft::async_result<bool>::handler_type& when_done) override;
     bool chk_create_snapshot() override;
 private:
+    RocksKVStore& store_;
     CommandApplier applier_;
     std::atomic<nuraft::ulong> last_commit_index_{0};
 };

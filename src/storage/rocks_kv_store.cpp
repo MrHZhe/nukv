@@ -1,6 +1,7 @@
 #include <nukv/storage/rocks_kv_store.hpp>
 
 #include <rocksdb/db.h>
+#include <rocksdb/write_batch.h>
 
 #include <stdexcept>
 
@@ -70,5 +71,32 @@ namespace nukv
             );
         }
         return true;
+    }
+
+    void RocksKVStore::WriteAtomically(
+        const std::vector<std::pair<std::string, std::string>>& puts,
+        const std::vector<std::string>& deletes)
+    {
+        rocksdb::WriteBatch batch;
+
+        for (const auto& [key, value] : puts)
+        {
+            batch.Put(key, value);
+        }
+
+        for (const auto& key : deletes)
+        {
+            batch.Delete(key);
+        }
+
+        const rocksdb::Status status = db_->Write(rocksdb::WriteOptions(),&batch);
+
+        if (!status.ok())
+        {
+            throw std::runtime_error(
+                "RocksDB atomic write failed: " +
+                status.ToString()
+            );
+        }
     }
 }

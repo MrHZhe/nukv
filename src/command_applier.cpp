@@ -1,6 +1,8 @@
 #include "nukv/command_applier.hpp"
 
 #include <stdexcept>
+#include <string>
+
 namespace nukv
 {
 CommandApplier::CommandApplier(RocksKVStore& store)
@@ -23,6 +25,65 @@ void CommandApplier::Apply(const proto::Command& command)
             throw std::invalid_argument(
             "GET command cannot be applied to the state machine"
             );
+
+        case proto::COMMAND_TYPE_UNSPECIFIED:
+        default:
+            throw std::invalid_argument(
+                "unsupported command type"
+            );
+    }
+}
+
+void CommandApplier::ApplyAtomically(
+    const proto::Command& command,
+    std::uint64_t log_idx)
+{
+    const std::string persisted_index =
+        std::to_string(log_idx);
+
+    switch (command.type())
+    {
+        case proto::COMMAND_TYPE_PUT:
+            store_.WriteAtomically(
+                {
+                    {
+                        command.key(),
+                        command.value()
+                    },
+                    {
+                        "__raft/last_commit_index",
+                        persisted_index
+                    }
+                },
+                {}
+            );
+            return;
+
+        case proto::COMMAND_TYPE_DELETE:
+            store_.WriteAtomically(
+                {
+                    {
+                        "__raft/last_commit_index",
+                        persisted_index
+                    }
+                },
+                {
+                    command.key()
+                }
+            );
+            return;
+
+        case proto::COMMAND_TYPE_GET:
+            store_.WriteAtomically(
+            {
+                {
+                    "__raft/last_commit_index",
+                    persisted_index
+                }
+            },
+            {}
+            );
+            return;
 
         case proto::COMMAND_TYPE_UNSPECIFIED:
         default:
