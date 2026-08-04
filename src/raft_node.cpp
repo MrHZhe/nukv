@@ -50,6 +50,9 @@ namespace nukv
 
         nuraft::asio_service::options asio_options;
         nuraft::raft_params raft_parameters;
+        raft_parameters
+        .with_snapshot_enabled(10)
+        .with_reserved_log_items(5);
 
         raft_server_ = launcher_.init(
             state_machine_,
