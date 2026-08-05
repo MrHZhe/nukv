@@ -206,6 +206,7 @@ int main()
             << "Commands: "
             << "status, "
             << "stop <node_id>, "
+            << "start <node_id>, "
             << "put <key> <value>, "
             << "get <key>, "
             << "del <key>, "
@@ -231,6 +232,41 @@ int main()
 
             if (operation.empty())
             {
+                continue;
+            }
+
+            if (operation == "start")
+            {
+                int node_id = 0;
+
+                if (!(input >> node_id) || node_id < 1 || node_id > 3)
+                {
+                    std::cout << "Usage: start <1|2|3>" << std::endl;
+                    continue;
+                }
+
+                try
+                {
+                    if (node_id == 1)
+                    {
+                        node1.Start();
+                    }
+                    else if (node_id == 2)
+                    {
+                        node2.Start();
+                    }
+                    else
+                    {
+                        node3.Start();
+                    }
+
+                    std::cout << "node" << node_id << " started" << std::endl;
+                }
+                catch (const std::exception& error)
+                {
+                    std::cout << "Failed to start node" << node_id << ": " << error.what() << std::endl;
+                }
+
                 continue;
             }
 
@@ -369,6 +405,12 @@ int main()
                     continue;
                 }
 
+                if (key.rfind("__raft/", 0) == 0)
+                {
+                    std::cout << "Keys beginning with __raft/ are reserved" << std::endl;
+                    continue;
+                }
+
                 nukv::proto::Command command;
 
                 command.set_type(
@@ -398,6 +440,12 @@ int main()
                 if (!(input >> key))
                 {
                     std::cout << "Usage: get <key>" << std::endl;
+                    continue;
+                }
+
+                if (key.rfind("__raft/", 0) == 0)
+                {
+                    std::cout << "Keys beginning with __raft/ are reserved" << std::endl;
                     continue;
                 }
 
@@ -432,6 +480,12 @@ int main()
                         << "Usage: del <key>"
                         << std::endl;
 
+                    continue;
+                }
+
+                if (key.rfind("__raft/", 0) == 0)
+                {
+                    std::cout << "Keys beginning with __raft/ are reserved" << std::endl;
                     continue;
                 }
 

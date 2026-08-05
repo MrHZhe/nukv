@@ -38,6 +38,10 @@ void CommandApplier::ApplyAtomically(
     const proto::Command& command,
     std::uint64_t log_idx)
 {
+    if (command.key().rfind("__raft/", 0) == 0)
+    {
+        throw std::invalid_argument("keys beginning with __raft/ are reserved");
+    }
     const std::string persisted_index =
         std::to_string(log_idx);
 

@@ -18,32 +18,22 @@ RaftStateMachine::RaftStateMachine(RocksKVStore& store)
 {
     const auto persisted_index = store_.Get("__raft/last_commit_index");
 
-    if (!persisted_index.has_value())
+    if (persisted_index.has_value())
     {
-        return;
+        std::size_t parsed_length = 0;
+
+        const unsigned long long restored_index =
+            std::stoull(persisted_index.value(), &parsed_length);
+
+        if (parsed_length != persisted_index->size())
+        {
+            throw std::runtime_error("invalid persisted last commit index");
+        }
+
+        last_commit_index_.store(
+            static_cast<nuraft::ulong>(restored_index),
+            std::memory_order_release);
     }
-
-    std::size_t parsed_length = 0;
-
-    const unsigned long long restored_index =
-        std::stoull(
-            persisted_index.value(),
-            &parsed_length
-        );
-
-    if (parsed_length != persisted_index->size())
-    {
-        throw std::runtime_error(
-            "invalid persisted last commit index"
-        );
-    }
-
-    last_commit_index_.store(
-        static_cast<nuraft::ulong>(
-            restored_index
-        ),
-        std::memory_order_release
-    );
 
     RestoreSnapshot();
 }
@@ -95,6 +85,12 @@ bool RaftStateMachine::apply_snapshot(nuraft::snapshot& snapshot)
     try
     {
         auto snapshot_buffer = snapshot.serialize();
+
+        if (!snapshot_buffer)
+        {
+            return false;
+        }
+
         auto cloned_snapshot = nuraft::snapshot::deserialize(*snapshot_buffer);
 
         if (!cloned_snapshot)
@@ -102,13 +98,74 @@ bool RaftStateMachine::apply_snapshot(nuraft::snapshot& snapshot)
             return false;
         }
 
-        store_.ReplaceAllUserEntriesAtomically(
+        const std::size_t max_size = std::numeric_limits<std::size_t>::max();
+        const std::size_t max_u32 = std::numeric_limits<std::uint32_t>::max();
+
+        if (incoming_snapshot_entries_.size() > max_u32)
+        {
+            return false;
+        }
+
+        std::size_t data_size = sizeof(std::uint32_t);
+
+        for (const auto& [key, value] : incoming_snapshot_entries_)
+        {
+            if (key.size() > max_u32 || value.size() > max_u32)
+            {
+                return false;
+            }
+
+            if (data_size > max_size - sizeof(std::uint32_t) ||
+                key.size() > max_size - data_size - sizeof(std::uint32_t))
+            {
+                return false;
+            }
+
+            data_size += sizeof(std::uint32_t) + key.size();
+
+            if (data_size > max_size - sizeof(std::uint32_t) ||
+                value.size() > max_size - data_size - sizeof(std::uint32_t))
+            {
+                return false;
+            }
+
+            data_size += sizeof(std::uint32_t) + value.size();
+        }
+
+        auto data_buffer = nuraft::buffer::alloc(data_size);
+
+        if (!data_buffer)
+        {
+            return false;
+        }
+
+        nuraft::buffer_serializer writer(data_buffer);
+        writer.put_u32(static_cast<std::uint32_t>(incoming_snapshot_entries_.size()));
+
+        for (const auto& [key, value] : incoming_snapshot_entries_)
+        {
+            writer.put_str(key);
+            writer.put_str(value);
+        }
+
+        const std::string metadata(
+            reinterpret_cast<const char*>(snapshot_buffer->data_begin()),
+            snapshot_buffer->size());
+
+        const std::string data(
+            reinterpret_cast<const char*>(data_buffer->data_begin()),
+            data_buffer->size());
+
+        store_.ApplySnapshotAtomically(
             incoming_snapshot_entries_,
-            snapshot_index);
+            snapshot_index,
+            metadata,
+            data);
 
         snapshot_entries_ = std::move(incoming_snapshot_entries_);
         last_snapshot_ = std::move(cloned_snapshot);
 
+        incoming_snapshot_entries_.clear();
         incoming_snapshot_index_ = 0;
         incoming_snapshot_ready_ = false;
 
@@ -260,51 +317,85 @@ int RaftStateMachine::read_logical_snp_obj(
         return -1;
     }
 
-    if (snapshot_entries_.size() > std::numeric_limits<std::uint32_t>::max())
+    const std::size_t max_size = std::numeric_limits<std::size_t>::max();
+    const std::size_t max_u32 = std::numeric_limits<std::uint32_t>::max();
+
+    if (snapshot_entries_.size() > max_u32)
     {
         return -1;
     }
 
-    std::size_t total_size = sizeof(std::uint32_t);
+    std::size_t data_size = sizeof(std::uint32_t);
 
     for (const auto& [key, value] : snapshot_entries_)
     {
-        if (key.size() > std::numeric_limits<std::uint32_t>::max() ||
-            value.size() > std::numeric_limits<std::uint32_t>::max())
+        if (key.size() > max_u32 || value.size() > max_u32)
         {
             return -1;
         }
 
-        total_size += sizeof(std::uint32_t) + key.size();
-        total_size += sizeof(std::uint32_t) + value.size();
+        if (data_size > max_size - sizeof(std::uint32_t) ||
+            key.size() > max_size - data_size - sizeof(std::uint32_t))
+        {
+            return -1;
+        }
+
+        data_size += sizeof(std::uint32_t) + key.size();
+
+        if (data_size > max_size - sizeof(std::uint32_t) ||
+            value.size() > max_size - data_size - sizeof(std::uint32_t))
+        {
+            return -1;
+        }
+
+        data_size += sizeof(std::uint32_t) + value.size();
     }
 
-    data_out = nuraft::buffer::alloc(total_size);
-    nuraft::buffer_serializer writer(data_out);
-
-    writer.put_u32(static_cast<std::uint32_t>(snapshot_entries_.size()));
-
-    for (const auto& [key, value] : snapshot_entries_)
+    try
     {
-        writer.put_str(key);
-        writer.put_str(value);
+        data_out = nuraft::buffer::alloc(data_size);
+
+        if (!data_out)
+        {
+            return -1;
+        }
+
+        nuraft::buffer_serializer writer(data_out);
+        writer.put_u32(static_cast<std::uint32_t>(snapshot_entries_.size()));
+
+        for (const auto& [key, value] : snapshot_entries_)
+        {
+            writer.put_str(key);
+            writer.put_str(value);
+        }
+    }
+    catch (...)
+    {
+        data_out = nullptr;
+        return -1;
     }
 
     is_last_obj = true;
     return 0;
 }
 
-void RaftStateMachine::save_logical_snp_obj(
-    nuraft::snapshot& snapshot,
-    nuraft::ulong& obj_id,
-    nuraft::buffer& data,
-    bool is_first_obj,
-    bool is_last_obj)
+    void RaftStateMachine::save_logical_snp_obj(
+        nuraft::snapshot& snapshot,
+        nuraft::ulong& obj_id,
+        nuraft::buffer& data,
+        bool is_first_obj,
+        bool is_last_obj)
     {
-
         if (obj_id != 0 || !is_first_obj || !is_last_obj)
         {
             throw std::runtime_error("unsupported snapshot object");
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(snapshot_mutex_);
+            incoming_snapshot_entries_.clear();
+            incoming_snapshot_index_ = 0;
+            incoming_snapshot_ready_ = false;
         }
 
         if (data.size() < sizeof(std::uint32_t))
@@ -328,6 +419,10 @@ void RaftStateMachine::save_logical_snp_obj(
         {
             std::string key = reader.get_str();
             std::string value = reader.get_str();
+            if (key.rfind("__raft/", 0) == 0)
+            {
+                throw std::runtime_error("snapshot contains reserved key");
+            }
             entries.emplace_back(std::move(key), std::move(value));
         }
 
@@ -363,6 +458,10 @@ void RaftStateMachine::save_logical_snp_obj(
         }
 
         auto metadata_buffer = nuraft::buffer::alloc(metadata.size());
+        if (!metadata_buffer)
+        {
+            throw std::runtime_error("failed to allocate snapshot metadata buffer");
+        }
         std::memcpy(metadata_buffer->data_begin(), metadata.data(), metadata.size());
 
         auto restored_snapshot = nuraft::snapshot::deserialize(*metadata_buffer);
@@ -373,6 +472,10 @@ void RaftStateMachine::save_logical_snp_obj(
         }
 
         auto data_buffer = nuraft::buffer::alloc(data.size());
+        if (!data_buffer)
+        {
+            throw std::runtime_error("failed to allocate snapshot data buffer");
+        }
         std::memcpy(data_buffer->data_begin(), data.data(), data.size());
 
         nuraft::buffer_serializer reader(data_buffer);

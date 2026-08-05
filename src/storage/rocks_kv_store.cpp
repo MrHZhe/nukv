@@ -135,10 +135,12 @@ namespace nukv
         }
         catch (...)
         {
+            iterator.reset();
             db_->ReleaseSnapshot(snapshot);
             throw;
         }
 
+        iterator.reset();
         db_->ReleaseSnapshot(snapshot);
 
         if (!status.ok())
@@ -149,53 +151,6 @@ namespace nukv
         return entries;
     }
 
-    void RocksKVStore::ReplaceAllUserEntriesAtomically(
-    const std::vector<std::pair<std::string, std::string>>& entries,
-    std::uint64_t last_commit_index)
-    {
-        rocksdb::WriteBatch batch;
-        rocksdb::ReadOptions options;
-        std::unique_ptr<rocksdb::Iterator> iterator(db_->NewIterator(options));
-
-        for (iterator->SeekToFirst(); iterator->Valid(); iterator->Next())
-        {
-            const std::string key = iterator->key().ToString();
-
-            if (key.rfind("__raft/", 0) != 0)
-            {
-                batch.Delete(key);
-            }
-        }
-
-        const rocksdb::Status iterator_status = iterator->status();
-
-        if (!iterator_status.ok())
-        {
-            throw std::runtime_error(
-                "RocksDB iteration failed: " + iterator_status.ToString());
-        }
-
-        for (const auto& [key, value] : entries)
-        {
-            if (key.rfind("__raft/", 0) == 0)
-            {
-                throw std::runtime_error("snapshot contains reserved key");
-            }
-
-            batch.Put(key, value);
-        }
-
-        batch.Put("__raft/last_commit_index", std::to_string(last_commit_index));
-
-        const rocksdb::Status write_status =
-            db_->Write(rocksdb::WriteOptions(), &batch);
-
-        if (!write_status.ok())
-        {
-            throw std::runtime_error(
-                "RocksDB snapshot apply failed: " + write_status.ToString());
-        }
-    }
 
     void RocksKVStore::SaveSnapshotAtomically(const std::string& metadata, const std::string& data)
     {
@@ -234,5 +189,54 @@ namespace nukv
         }
 
         return std::make_pair(std::move(metadata), std::move(data));
+    }
+
+    void RocksKVStore::ApplySnapshotAtomically(
+    const std::vector<std::pair<std::string, std::string>>& entries,
+    std::uint64_t last_commit_index,
+    const std::string& metadata,
+    const std::string& data)
+    {
+        rocksdb::WriteBatch batch;
+        rocksdb::ReadOptions options;
+        std::unique_ptr<rocksdb::Iterator> iterator(db_->NewIterator(options));
+
+        for (iterator->SeekToFirst(); iterator->Valid(); iterator->Next())
+        {
+            const std::string key = iterator->key().ToString();
+
+            if (key.rfind("__raft/", 0) != 0)
+            {
+                batch.Delete(key);
+            }
+        }
+
+        const rocksdb::Status iterator_status = iterator->status();
+
+        if (!iterator_status.ok())
+        {
+            throw std::runtime_error("RocksDB iteration failed: " + iterator_status.ToString());
+        }
+
+        for (const auto& [key, value] : entries)
+        {
+            if (key.rfind("__raft/", 0) == 0)
+            {
+                throw std::runtime_error("snapshot contains reserved key");
+            }
+
+            batch.Put(key, value);
+        }
+
+        batch.Put("__raft/last_commit_index", std::to_string(last_commit_index));
+        batch.Put("__raft/snapshot_metadata", metadata);
+        batch.Put("__raft/snapshot_data", data);
+
+        const rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
+
+        if (!status.ok())
+        {
+            throw std::runtime_error("RocksDB snapshot apply failed: " + status.ToString());
+        }
     }
 }
