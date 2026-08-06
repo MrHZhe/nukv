@@ -11,13 +11,25 @@
 #include <vector>
 #include <iostream>
 
-int main()
+int main(int argc, char* argv[])
 {
     try
     {
-        std::filesystem::create_directories("./data/node1");
-        std::filesystem::create_directories("./data/node2");
-        std::filesystem::create_directories("./data/node3");
+        if (argc != 2)
+        {
+            std::cerr << "Usage: nukv_server <node_id>" << std::endl;
+            return 1;
+        }
+
+        std::size_t parsed_length = 0;
+        const std::string node_id_argument = argv[1];
+        const int node_id = std::stoi(node_id_argument, &parsed_length);
+
+        if (parsed_length != node_id_argument.size() || node_id < 1 || node_id > 3)
+        {
+            std::cerr << "node_id must be 1, 2, or 3" << std::endl;
+            return 1;
+        }
 
         const std::vector<nukv::RaftPeer> peers = {
             {1, "127.0.0.1:19001"},
@@ -25,200 +37,30 @@ int main()
             {3, "127.0.0.1:19003"}
         };
 
-        nukv::RaftNode node1(
-            1,
-            "127.0.0.1:19001",
-            19001,
-            "./data/node1/state_db",
-            "./data/node1/raft_meta",
-            peers
-        );
+        const int port = 19000 + node_id;
+        const std::string endpoint = "127.0.0.1:" + std::to_string(port);
+        const std::string data_directory = "./data/node" + std::to_string(node_id);
 
-        nukv::RaftNode node2(
-            2,
-            "127.0.0.1:19002",
-            19002,
-            "./data/node2/state_db",
-            "./data/node2/raft_meta",
-            peers
-        );
+        std::filesystem::create_directories(data_directory);
 
-        nukv::RaftNode node3(
-            3,
-            "127.0.0.1:19003",
-            19003,
-            "./data/node3/state_db",
-            "./data/node3/raft_meta",
-            peers
-        );
+        nukv::RaftNode node(
+            node_id,
+            endpoint,
+            port,
+            data_directory + "/state_db",
+            data_directory + "/raft_meta",
+            peers);
 
-        std::exception_ptr node1_error;
-        std::exception_ptr node2_error;
-        std::exception_ptr node3_error;
+        node.Start();
 
-        std::thread thread1(
-            [&node1, &node1_error]()
-            {
-                try
-                {
-                    node1.Start();
-                }
-                catch (...)
-                {
-                    node1_error =
-                        std::current_exception();
-                }
-            }
-        );
-
-        std::thread thread2(
-            [&node2, &node2_error]()
-            {
-                try
-                {
-                    node2.Start();
-                }
-                catch (...)
-                {
-                    node2_error =
-                        std::current_exception();
-                }
-            }
-        );
-
-        std::thread thread3(
-            [&node3, &node3_error]()
-            {
-                try
-                {
-                    node3.Start();
-                }
-                catch (...)
-                {
-                    node3_error =
-                        std::current_exception();
-                }
-            }
-        );
-
-        thread1.join();
-        thread2.join();
-        thread3.join();
-
-        if (node1_error)
-        {
-            std::rethrow_exception(node1_error);
-        }
-
-        if (node2_error)
-        {
-            std::rethrow_exception(node2_error);
-        }
-
-        if (node3_error)
-        {
-            std::rethrow_exception(node3_error);
-        }
-
-        auto find_leader =
-            [&node1, &node2, &node3]()
-                -> nukv::RaftNode*
-            {
-                if (node1.IsLeader())
-                {
-                    return &node1;
-                }
-
-                if (node2.IsLeader())
-                {
-                    return &node2;
-                }
-
-                if (node3.IsLeader())
-                {
-                    return &node3;
-                }
-
-                return nullptr;
-            };
-
-        auto get_node_id =
-            [&node1, &node2, &node3](
-                const nukv::RaftNode* node)
-            {
-                if (node == &node1)
-                {
-                    return 1;
-                }
-
-                if (node == &node2)
-                {
-                    return 2;
-                }
-
-                if (node == &node3)
-                {
-                    return 3;
-                }
-
-                return 0;
-            };
-
-        nukv::RaftNode* leader = nullptr;
-
-        for (int i = 0; i < 50; ++i)
-        {
-            leader = find_leader();
-
-            if (leader)
-            {
-                break;
-            }
-
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(100)
-            );
-        }
-
-        if (!leader)
-        {
-            std::cout
-                << "Leader election timed out."
-                << std::endl;
-
-            node1.Stop();
-            node2.Stop();
-            node3.Stop();
-
-            return 1;
-        }
-
-        std::cout
-            << "Three NuKV nodes started successfully."
-            << std::endl;
-
-        std::cout
-            << "Leader elected: node"
-            << get_node_id(leader)
-            << std::endl;
-
-        std::cout
-            << "Commands: "
-            << "status, "
-            << "stop <node_id>, "
-            << "start <node_id>, "
-            << "put <key> <value>, "
-            << "get <key>, "
-            << "del <key>, "
-            << "check <key>, "
-            << "exit"
-            << std::endl;
+        std::cout << "NuKV node" << node_id << " started at " << endpoint << std::endl;
+        std::cout << "Commands: status, put <key> <value>, get <key>, del <key>, exit" << std::endl;
 
         std::string line;
 
         while (true)
         {
-            std::cout << "nukv> " << std::flush;
+            std::cout << "nukv-node" << node_id << "> " << std::flush;
 
             if (!std::getline(std::cin, line))
             {
@@ -226,47 +68,11 @@ int main()
             }
 
             std::istringstream input(line);
-
             std::string operation;
             input >> operation;
 
             if (operation.empty())
             {
-                continue;
-            }
-
-            if (operation == "start")
-            {
-                int node_id = 0;
-
-                if (!(input >> node_id) || node_id < 1 || node_id > 3)
-                {
-                    std::cout << "Usage: start <1|2|3>" << std::endl;
-                    continue;
-                }
-
-                try
-                {
-                    if (node_id == 1)
-                    {
-                        node1.Start();
-                    }
-                    else if (node_id == 2)
-                    {
-                        node2.Start();
-                    }
-                    else
-                    {
-                        node3.Start();
-                    }
-
-                    std::cout << "node" << node_id << " started" << std::endl;
-                }
-                catch (const std::exception& error)
-                {
-                    std::cout << "Failed to start node" << node_id << ": " << error.what() << std::endl;
-                }
-
                 continue;
             }
 
@@ -277,117 +83,13 @@ int main()
 
             if (operation == "status")
             {
-                leader = find_leader();
-
-                if (leader)
-                {
-                    std::cout
-                        << "Leader: node"
-                        << get_node_id(leader)
-                        << std::endl;
-                }
-                else
-                {
-                    std::cout
-                        << "NO_LEADER"
-                        << std::endl;
-                }
-
+                std::cout << (node.IsLeader() ? "LEADER" : "FOLLOWER") << std::endl;
                 continue;
             }
 
-            if (operation == "stop")
+            if (!node.IsLeader())
             {
-                int node_id = 0;
-
-                if (!(input >> node_id)
-                    || node_id < 1
-                    || node_id > 3)
-                {
-                    std::cout
-                        << "Usage: stop <1|2|3>"
-                        << std::endl;
-
-                    continue;
-                }
-
-                if (node_id == 1)
-                {
-                    node1.Stop();
-                }
-                else if (node_id == 2)
-                {
-                    node2.Stop();
-                }
-                else
-                {
-                    node3.Stop();
-                }
-
-                std::cout
-                    << "node"
-                    << node_id
-                    << " stopped"
-                    << std::endl;
-
-                continue;
-            }
-
-            if (operation == "check")
-            {
-                std::string key;
-
-                if (!(input >> key))
-                {
-                    std::cout
-                        << "Usage: check <key>"
-                        << std::endl;
-
-                    continue;
-                }
-
-                const auto print_value =
-                    [&key](
-                        int node_id,
-                        const nukv::RaftNode& node)
-                    {
-                        const auto value =
-                            node.GetLocal(key);
-
-                        std::cout
-                            << "node"
-                            << node_id
-                            << ": ";
-
-                        if (value.has_value())
-                        {
-                            std::cout
-                                << value.value();
-                        }
-                        else
-                        {
-                            std::cout
-                                << "NOT_FOUND";
-                        }
-
-                        std::cout << std::endl;
-                    };
-
-                print_value(1, node1);
-                print_value(2, node2);
-                print_value(3, node3);
-
-                continue;
-            }
-
-            leader = find_leader();
-
-            if (!leader)
-            {
-                std::cout
-                    << "NO_LEADER"
-                    << std::endl;
-
+                std::cout << "NOT_LEADER" << std::endl;
                 continue;
             }
 
@@ -398,10 +100,7 @@ int main()
 
                 if (!(input >> key >> value))
                 {
-                    std::cout
-                        << "Usage: put <key> <value>"
-                        << std::endl;
-
+                    std::cout << "Usage: put <key> <value>" << std::endl;
                     continue;
                 }
 
@@ -412,26 +111,11 @@ int main()
                 }
 
                 nukv::proto::Command command;
-
-                command.set_type(
-                    nukv::proto::COMMAND_TYPE_PUT
-                );
-
+                command.set_type(nukv::proto::COMMAND_TYPE_PUT);
                 command.set_key(key);
                 command.set_value(value);
 
-                if (leader->Submit(command))
-                {
-                    std::cout
-                        << "OK"
-                        << std::endl;
-                }
-                else
-                {
-                    std::cout
-                        << "PUT failed"
-                        << std::endl;
-                }
+                std::cout << (node.Submit(command) ? "OK" : "PUT failed") << std::endl;
             }
             else if (operation == "get")
             {
@@ -453,22 +137,14 @@ int main()
                 command.set_type(nukv::proto::COMMAND_TYPE_GET);
                 command.set_key(key);
 
-                if (!leader->Submit(command))
+                if (!node.Submit(command))
                 {
                     std::cout << "GET failed" << std::endl;
                     continue;
                 }
 
-                const auto value = leader->GetLocal(key);
-
-                if (value.has_value())
-                {
-                    std::cout << value.value() << std::endl;
-                }
-                else
-                {
-                    std::cout << "NOT_FOUND" << std::endl;
-                }
+                const auto value = node.GetLocal(key);
+                std::cout << (value.has_value() ? value.value() : "NOT_FOUND") << std::endl;
             }
             else if (operation == "del")
             {
@@ -476,10 +152,7 @@ int main()
 
                 if (!(input >> key))
                 {
-                    std::cout
-                        << "Usage: del <key>"
-                        << std::endl;
-
+                    std::cout << "Usage: del <key>" << std::endl;
                     continue;
                 }
 
@@ -490,50 +163,23 @@ int main()
                 }
 
                 nukv::proto::Command command;
-
-                command.set_type(
-                    nukv::proto::
-                        COMMAND_TYPE_DELETE
-                );
-
+                command.set_type(nukv::proto::COMMAND_TYPE_DELETE);
                 command.set_key(key);
 
-                if (leader->Submit(command))
-                {
-                    std::cout
-                        << "OK"
-                        << std::endl;
-                }
-                else
-                {
-                    std::cout
-                        << "DELETE failed"
-                        << std::endl;
-                }
+                std::cout << (node.Submit(command) ? "OK" : "DELETE failed") << std::endl;
             }
             else
             {
-                std::cout
-                    << "Unknown command"
-                    << std::endl;
+                std::cout << "Unknown command" << std::endl;
             }
         }
 
-        node1.Stop();
-        node2.Stop();
-        node3.Stop();
-
-        std::cout
-            << "NuKV cluster stopped."
-            << std::endl;
+        node.Stop();
+        std::cout << "NuKV node" << node_id << " stopped." << std::endl;
     }
     catch (const std::exception& error)
     {
-        std::cerr
-            << "Failed to run NuKV cluster: "
-            << error.what()
-            << std::endl;
-
+        std::cerr << "Failed to run NuKV node: " << error.what() << std::endl;
         return 1;
     }
 

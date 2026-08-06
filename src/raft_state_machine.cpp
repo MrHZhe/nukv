@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <iostream>
 #include <cstring>
+#include <unordered_set>
 
 namespace nukv
 {
@@ -415,6 +416,9 @@ int RaftStateMachine::read_logical_snp_obj(
         std::vector<std::pair<std::string, std::string>> entries;
         entries.reserve(entry_count);
 
+        std::unordered_set<std::string> keys;
+        keys.reserve(entry_count);
+
         for (std::uint32_t i = 0; i < entry_count; ++i)
         {
             std::string key = reader.get_str();
@@ -422,6 +426,10 @@ int RaftStateMachine::read_logical_snp_obj(
             if (key.rfind("__raft/", 0) == 0)
             {
                 throw std::runtime_error("snapshot contains reserved key");
+            }
+            if (!keys.insert(key).second)
+            {
+                throw std::runtime_error("snapshot contains duplicate key");
             }
             entries.emplace_back(std::move(key), std::move(value));
         }
@@ -490,10 +498,21 @@ int RaftStateMachine::read_logical_snp_obj(
         std::vector<std::pair<std::string, std::string>> entries;
         entries.reserve(entry_count);
 
+        std::unordered_set<std::string> keys;
+        keys.reserve(entry_count);
+
         for (std::uint32_t i = 0; i < entry_count; ++i)
         {
             std::string key = reader.get_str();
             std::string value = reader.get_str();
+            if (key.rfind("__raft/", 0) == 0)
+            {
+                throw std::runtime_error("persisted snapshot contains reserved key");
+            }
+            if (!keys.insert(key).second)
+            {
+                throw std::runtime_error("persisted snapshot contains duplicate key");
+            }
             entries.emplace_back(std::move(key), std::move(value));
         }
 

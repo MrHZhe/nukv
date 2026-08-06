@@ -5,6 +5,7 @@
 #include <rocksdb/iterator.h>
 
 #include <stdexcept>
+#include <unordered_set>
 
 namespace nukv
 {
@@ -218,11 +219,18 @@ namespace nukv
             throw std::runtime_error("RocksDB iteration failed: " + iterator_status.ToString());
         }
 
+        std::unordered_set<std::string> keys;
+        keys.reserve(entries.size());
         for (const auto& [key, value] : entries)
         {
             if (key.rfind("__raft/", 0) == 0)
             {
                 throw std::runtime_error("snapshot contains reserved key");
+            }
+
+            if (!keys.insert(key).second)
+            {
+                throw std::runtime_error("snapshot contains duplicate key");
             }
 
             batch.Put(key, value);

@@ -2,6 +2,8 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <cstdint>
+#include <limits>
 
 
 namespace nukv
@@ -37,8 +39,12 @@ nuraft::ulong RaftLogStore::NextSlotUnlocked() const
 
 void RaftLogStore::PersistUnlocked()
 {
-    std::vector<std::pair<nuraft::ulong,nuraft::ptr<nuraft::buffer>>> serialized_entries;
+    std::vector<std::pair<nuraft::ulong, nuraft::ptr<nuraft::buffer>>> serialized_entries;
 
+    const std::size_t max_size = std::numeric_limits<std::size_t>::max();
+    const std::size_t max_entry_count = static_cast<std::size_t>(std::numeric_limits<int32_t>::max());
+    const std::size_t max_entry_size = static_cast<std::size_t>(std::numeric_limits<int32_t>::max());
+    const std::size_t entry_header_size = sizeof(nuraft::ulong) + sizeof(int32_t);
     std::size_t total_size = sizeof(nuraft::ulong) + sizeof(int32_t);
 
     for (const auto& [index, entry] : logs_)
@@ -48,55 +54,61 @@ void RaftLogStore::PersistUnlocked()
             continue;
         }
 
+        if (!entry)
+        {
+            throw std::runtime_error("Raft log entry is null");
+        }
+
+        if (serialized_entries.size() >= max_entry_count)
+        {
+            throw std::runtime_error("too many Raft log entries to persist");
+        }
+
         auto serialized = entry->serialize();
 
         if (!serialized)
         {
-            throw std::runtime_error(
-                "failed to serialize Raft log entry"
-            );
+            throw std::runtime_error("failed to serialize Raft log entry");
         }
 
-        total_size +=
-            sizeof(nuraft::ulong) +
-            sizeof(int32_t) +
-            serialized->size();
+        const std::size_t serialized_size = serialized->size();
 
-        serialized_entries.emplace_back(index,std::move(serialized));
+        if (serialized_size == 0 || serialized_size > max_entry_size)
+        {
+            throw std::runtime_error("Raft log entry is too large to persist");
+        }
+
+        if (total_size > max_size - entry_header_size ||
+            serialized_size > max_size - total_size - entry_header_size)
+        {
+            throw std::runtime_error("persisted Raft log size overflow");
+        }
+
+        total_size += entry_header_size + serialized_size;
+        serialized_entries.emplace_back(index, std::move(serialized));
     }
 
     auto output = nuraft::buffer::alloc(total_size);
 
+    if (!output)
+    {
+        throw std::runtime_error("failed to allocate persisted Raft log buffer");
+    }
+
     output->pos(0);
-
     output->put(start_index_);
+    output->put(static_cast<int32_t>(serialized_entries.size()));
 
-    output->put(
-        static_cast<int32_t>(
-            serialized_entries.size()
-        )
-    );
-
-    for (auto& [index, serialized] :
-         serialized_entries)
+    for (auto& [index, serialized] : serialized_entries)
     {
         output->put(index);
-
-        output->put(
-            static_cast<int32_t>(
-                serialized->size()
-            )
-        );
-
+        output->put(static_cast<int32_t>(serialized->size()));
         output->put(*serialized);
     }
 
     const std::string data(
-        reinterpret_cast<const char*>(
-            output->data_begin()
-        ),
-        output->size()
-    );
+        reinterpret_cast<const char*>(output->data_begin()),
+        output->size());
 
     storage_.Put("__raft/logs", data);
 }
@@ -124,6 +136,10 @@ void RaftLogStore::Restore()
 
     auto input =
         nuraft::buffer::alloc(data->size());
+    if (!input)
+    {
+        throw std::runtime_error("failed to allocate persisted Raft log buffer");
+    }
 
     std::memcpy(
         input->data_begin(),
@@ -162,6 +178,10 @@ void RaftLogStore::Restore()
         nuraft::buffer::alloc(
             sizeof(nuraft::ulong)
         );
+    if (!dummy_buffer)
+    {
+        throw std::runtime_error("failed to allocate dummy Raft log buffer");
+    }
 
     restored_logs[0] =
         nuraft::cs_new<nuraft::log_entry>(
@@ -199,12 +219,24 @@ void RaftLogStore::Restore()
             );
         }
 
-        if (previous_index != 0 &&
-            index <= previous_index)
+        if (i == 0)
         {
-            throw std::runtime_error(
-                "persisted Raft log indexes are not ordered"
-            );
+            if (index != restored_start_index)
+            {
+                throw std::runtime_error(
+                    "first persisted Raft log index does not match start index"
+                );
+            }
+        }
+        else
+        {
+            if (previous_index == std::numeric_limits<nuraft::ulong>::max() ||
+                index != previous_index + 1)
+            {
+                throw std::runtime_error(
+                    "persisted Raft log indexes are not contiguous"
+                );
+            }
         }
 
         if (entry_size <= 0)
@@ -232,6 +264,10 @@ void RaftLogStore::Restore()
             nuraft::buffer::alloc(
                 serialized_size
             );
+        if (!entry_buffer)
+        {
+            throw std::runtime_error("failed to allocate persisted Raft log entry buffer");
+        }
 
         input->get(entry_buffer);
         entry_buffer->pos(0);
@@ -630,55 +666,110 @@ RaftLogStore::pack(
     return output;
 }
 
-void RaftLogStore::apply_pack(nuraft::ulong index,nuraft::buffer& pack)
+void RaftLogStore::apply_pack(nuraft::ulong index, nuraft::buffer& pack)
 {
-    // 索引 0 是永久保留的 dummy 日志。
     if (index == 0)
-    {
-        return;
-    }
-
-    pack.pos(0);
-
-    const int32_t count = pack.get_int();
-
-    if (count <= 0)
     {
         return;
     }
 
     std::vector<nuraft::ptr<nuraft::log_entry>> entries;
 
-    entries.reserve(static_cast<std::size_t>(count));
-
-    // 先完整反序列化，全部成功后再修改 logs_，
-    // 避免只应用一部分日志。
-    for (int32_t offset = 0; offset < count; ++offset)
+    try
     {
-        const int32_t entry_size = pack.get_int();
+        pack.pos(0);
 
-        if (entry_size <= 0)
+        if (pack.size() < sizeof(int32_t))
         {
             return;
         }
 
-        auto entry_buffer =
-            nuraft::buffer::alloc(
-                static_cast<std::size_t>(
-                    entry_size));
+        const int32_t count = pack.get_int();
 
-        pack.get(entry_buffer);
-
-        auto entry =
-            nuraft::log_entry::deserialize(
-                *entry_buffer);
-
-        if (!entry)
+        if (count <= 0)
         {
             return;
         }
 
-        entries.push_back(std::move(entry));
+        if (pack.pos() > pack.size())
+        {
+            return;
+        }
+
+        const std::size_t remaining_size = pack.size() - pack.pos();
+
+        if (static_cast<std::size_t>(count) >
+            remaining_size / sizeof(int32_t))
+        {
+            return;
+        }
+
+        entries.reserve(static_cast<std::size_t>(count));
+
+        for (int32_t offset = 0; offset < count; ++offset)
+        {
+            if (pack.pos() > pack.size() ||
+                pack.size() - pack.pos() < sizeof(int32_t))
+            {
+                return;
+            }
+
+            const int32_t entry_size = pack.get_int();
+
+            if (entry_size <= 0)
+            {
+                return;
+            }
+
+            const std::size_t serialized_size =
+                static_cast<std::size_t>(entry_size);
+
+            if (pack.pos() > pack.size() ||
+                serialized_size > pack.size() - pack.pos())
+            {
+                return;
+            }
+
+            auto entry_buffer = nuraft::buffer::alloc(serialized_size);
+
+            if (!entry_buffer)
+            {
+                return;
+            }
+
+            pack.get(entry_buffer);
+
+            auto entry = nuraft::log_entry::deserialize(*entry_buffer);
+
+            if (!entry)
+            {
+                return;
+            }
+
+            entries.push_back(std::move(entry));
+        }
+
+        if (pack.pos() != pack.size())
+        {
+            return;
+        }
+    }
+    catch (...)
+    {
+        return;
+    }
+
+    if (entries.empty())
+    {
+        return;
+    }
+
+    const nuraft::ulong max_index =
+        std::numeric_limits<nuraft::ulong>::max();
+
+    if (entries.size() - 1 > max_index - index)
+    {
+        return;
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -687,23 +778,16 @@ void RaftLogStore::apply_pack(nuraft::ulong index,nuraft::buffer& pack)
     const nuraft::ulong old_start_index = start_index_;
 
     auto erase_begin = logs_.lower_bound(index);
+    logs_.erase(erase_begin, logs_.end());
 
-    logs_.erase(erase_begin,logs_.end());
-
-
-    for (std::size_t offset = 0;
-         offset < entries.size();
-         ++offset)
+    for (std::size_t offset = 0; offset < entries.size(); ++offset)
     {
         const nuraft::ulong current_index =
-            index +
-            static_cast<nuraft::ulong>(offset);
+            index + static_cast<nuraft::ulong>(offset);
 
-        logs_[current_index] =
-            std::move(entries[offset]);
+        logs_[current_index] = std::move(entries[offset]);
     }
 
-    // 第一条真实日志决定当前逻辑起点。
     auto first_entry = logs_.upper_bound(0);
 
     if (first_entry != logs_.end())
