@@ -2,9 +2,7 @@
 #include "command.pb.h"
 
 #include <utility>
-#include <chrono>
 #include <stdexcept>
-#include <thread>
 #include <cstring>
 
 namespace nukv
@@ -72,26 +70,11 @@ namespace nukv
             );
         }
 
-        const auto deadline =
-            std::chrono::steady_clock::now()
-            + std::chrono::seconds(5);
+    }
 
-        while (!raft_server_->is_initialized())
-        {
-            if (std::chrono::steady_clock::now()
-                >= deadline)
-            {
-                Stop();
-
-                throw std::runtime_error(
-                    "timed out waiting for Raft server initialization"
-                );
-            }
-
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(50)
-            );
-        }
+    bool RaftNode::IsReady() const
+    {
+        return raft_server_ && raft_server_->is_initialized();
     }
 
     bool RaftNode::IsLeader() const

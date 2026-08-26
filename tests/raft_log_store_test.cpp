@@ -1,11 +1,48 @@
 #include "nukv/raft_log_store.hpp"
 
 #include <cassert>
+#include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <string>
+#include <system_error>
+
+namespace
+{
+class TemporaryDirectory final
+{
+public:
+    TemporaryDirectory()
+        : path_(
+            std::filesystem::temp_directory_path() /
+            ("nukv_raft_log_store_test_" +
+             std::to_string(
+                 std::chrono::steady_clock::now().time_since_epoch().count())))
+    {
+        std::filesystem::remove_all(path_);
+    }
+
+    ~TemporaryDirectory()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    const std::filesystem::path& Path() const
+    {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+}
 
 int main()
 {
-    nukv::RaftLogStore log_store;
+    TemporaryDirectory test_directory;
+    nukv::RocksKVStore storage(test_directory.Path().string());
+    nukv::RaftLogStore log_store(storage);
 
     // 初始状态：没有真实日志，第一条日志从索引 1 开始。
     assert(log_store.start_index() == 1);

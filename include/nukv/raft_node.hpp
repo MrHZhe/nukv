@@ -39,6 +39,8 @@ public:
 
     void Stop();
 
+    bool IsReady() const;
+
     bool IsLeader() const;
 
     bool Submit(const proto::Command& command);

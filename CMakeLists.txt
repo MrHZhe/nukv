@@ -23,6 +23,14 @@ add_subdirectory(
     third_party/NuRaft-build
 )
 
+# Build the bundled mymuduo dependency from the Git submodule.
+set(MY_MUDUO_BUILD_EXAMPLES OFF CACHE BOOL "Build mymuduo examples" FORCE)
+add_subdirectory(
+    third_party/mymuduo
+    third_party/mymuduo-build
+    EXCLUDE_FROM_ALL
+)
+
 # ============================================================
 # 第三方依赖
 # ============================================================
@@ -153,6 +161,7 @@ protobuf_generate(
 
     PROTOS
     "${NUKV_PROTO_SOURCE_DIR}/command.proto"
+    "${NUKV_PROTO_SOURCE_DIR}/client.proto"
 
     IMPORT_DIRS
     "${NUKV_PROTO_SOURCE_DIR}"
@@ -277,12 +286,14 @@ add_dependencies(
 add_executable(
     nukv_server
     src/main.cpp
+    src/client_server.cpp
 )
 
 target_link_libraries(
     nukv_server
     PRIVATE
     nukv_raft
+    mymuduo::mymuduo
 )
 
 # ============================================================

@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package nukv.proto;
+
+message ClientRequest
+{
+    enum Operation
+    {
+        OPERATION_UNSPECIFIED = 0;
+        OPERATION_PUT = 1;
+        OPERATION_GET = 2;
+        OPERATION_DELETE = 3;
+    }
+
+    uint64 request_id = 1;
+    Operation operation = 2;
+    bytes key = 3;
+    bytes value = 4;
+}
+
+message ClientResponse
+{
+    enum Status
+    {
+        STATUS_UNSPECIFIED = 0;
+        STATUS_OK = 1;
+        STATUS_NOT_FOUND = 2;
+        STATUS_NOT_LEADER = 3;
+        STATUS_INVALID_REQUEST = 4;
+        STATUS_ERROR = 5;
+        STATUS_NOT_READY = 6;
+    }
+
+    uint64 request_id = 1;
+    Status status = 2;
+    bytes value = 3;
+    string message = 4;
+}

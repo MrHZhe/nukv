@@ -1,3 +1,6 @@
 [submodule "third_party/NuRaft"]
 	path = third_party/NuRaft
 	url = https://github.com/eBay/NuRaft.git
+[submodule "third_party/mymuduo"]
+	path = third_party/mymuduo
+	url = https://github.com/MrHZhe/mymuduo.git
