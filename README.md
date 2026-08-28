@@ -90,6 +90,26 @@ PEERS='1=127.0.0.1:19001,2=127.0.0.1:19002,3=127.0.0.1:19003'
 The explicit form is required with custom peer addresses and prevents reusing
 persisted data from another cluster.
 
+### Configuration files
+
+The same options can be stored in a simple `key=value` file. The repository
+includes `configs/node1.conf`, `configs/node2.conf`, and `configs/node3.conf`.
+Each file sets the node ID, client port, and data directory; when `peers` is
+omitted, the built-in local peer list is used.
+
+Start the nodes separately with:
+
+```bash
+./build/nukv_server --config configs/node1.conf
+./build/nukv_server --config configs/node2.conf
+./build/nukv_server --config configs/node3.conf
+```
+
+Supported keys are `node_id`, `peers`, `client_port`, and `data_dir`. Command-
+line options override values loaded from the configuration file. For a custom
+multi-host cluster, put the same complete `peers` list in each node's config,
+and set that node's own ID, client port, and data directory separately.
+
 ## Client protocol
 
 Requests and responses use a four-byte big-endian payload length followed by a
@@ -116,8 +136,7 @@ restarted-node log catch-up, and final RocksDB replica consistency.
 
 ## Verification results
 
-At commit `9e560f9` on 2026-08-28, the Release build completed successfully and
-CTest reported:
+On 2026-08-28, the Release build completed successfully and CTest reported:
 
 ```text
 100% tests passed out of 5

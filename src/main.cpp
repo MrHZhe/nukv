@@ -7,6 +7,7 @@
 #include <exception>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <set>
 #include <sstream>
@@ -39,6 +40,7 @@ void PrintUsage()
         << "  nukv_server <node_id> [client_port]\n"
         << "  nukv_server --node-id <id> [options]\n\n"
         << "Options:\n"
+        << "  --config <path>\n"
         << "  --node-id <1|2|3>\n"
         << "  --peers <id=host:port,id=host:port,id=host:port>\n"
         << "  --client-port <port>\n"
@@ -46,6 +48,17 @@ void PrintUsage()
         << "  --help\n\n"
         << "Without --peers, the default local cluster is used:\n"
         << "  1=127.0.0.1:19001,2=127.0.0.1:19002,3=127.0.0.1:19003\n";
+}
+
+std::string Trim(const std::string& value)
+{
+    const std::size_t begin = value.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos)
+    {
+        return {};
+    }
+    const std::size_t end = value.find_last_not_of(" \t\r\n");
+    return value.substr(begin, end - begin + 1);
 }
 
 int ParseInteger(const std::string& value, const std::string& name)
@@ -132,6 +145,82 @@ std::string RequireValue(int& index, int argc, char* argv[], const std::string& 
     return argv[index];
 }
 
+void LoadConfig(
+    const std::string& path,
+    ServerOptions& options,
+    bool& node_id_set,
+    bool& peers_set,
+    bool& client_port_set,
+    bool& data_directory_set)
+{
+    std::ifstream input(path);
+    if (!input)
+    {
+        throw std::invalid_argument("failed to open config file: " + path);
+    }
+
+    std::string line;
+    std::size_t line_number = 0;
+    while (std::getline(input, line))
+    {
+        ++line_number;
+        const std::size_t comment = line.find('#');
+        if (comment != std::string::npos)
+        {
+            line.erase(comment);
+        }
+        line = Trim(line);
+        if (line.empty())
+        {
+            continue;
+        }
+
+        const std::size_t separator = line.find('=');
+        if (separator == std::string::npos)
+        {
+            throw std::invalid_argument(
+                "config line " + std::to_string(line_number) +
+                " must use key=value format");
+        }
+
+        const std::string key = Trim(line.substr(0, separator));
+        const std::string value = Trim(line.substr(separator + 1));
+        if (key.empty() || value.empty())
+        {
+            throw std::invalid_argument(
+                "config line " + std::to_string(line_number) +
+                " has an empty key or value");
+        }
+
+        if (key == "node_id")
+        {
+            options.node_id = ParseInteger(value, "node_id");
+            node_id_set = true;
+        }
+        else if (key == "peers")
+        {
+            options.peers = ParsePeers(value);
+            peers_set = true;
+        }
+        else if (key == "client_port")
+        {
+            options.client_port = ParsePort(value, "client_port");
+            client_port_set = true;
+        }
+        else if (key == "data_dir")
+        {
+            options.data_directory = value;
+            data_directory_set = true;
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "unknown config key at line " + std::to_string(line_number) +
+                ": " + key);
+        }
+    }
+}
+
 ServerOptions ParseOptions(int argc, char* argv[])
 {
     ServerOptions options;
@@ -141,6 +230,27 @@ ServerOptions ParseOptions(int argc, char* argv[])
     bool peers_set = false;
     bool client_port_set = false;
     bool data_directory_set = false;
+
+    // Load the config first so explicit command-line options can override it.
+    std::string config_path;
+    for (int scan_index = 1; scan_index < argc; ++scan_index)
+    {
+        if (std::string(argv[scan_index]) == "--config")
+        {
+            config_path = RequireValue(scan_index, argc, argv, "--config");
+        }
+    }
+    if (!config_path.empty())
+    {
+        LoadConfig(
+            config_path,
+            options,
+            node_id_set,
+            peers_set,
+            client_port_set,
+            data_directory_set);
+    }
+
     int index = 1;
 
     if (index < argc && argv[index][0] != '-')
@@ -166,7 +276,11 @@ ServerOptions ParseOptions(int argc, char* argv[])
             PrintUsage();
             std::exit(0);
         }
-        if (option == "--node-id")
+        if (option == "--config")
+        {
+            RequireValue(index, argc, argv, option);
+        }
+        else if (option == "--node-id")
         {
             options.node_id = ParseInteger(
                 RequireValue(index, argc, argv, option), "node_id");
