@@ -345,3 +345,39 @@ add_test(
     NAME raft_log_store_test
     COMMAND raft_log_store_test
 )
+
+# ============================================================
+# 三节点端到端集成测试
+# ============================================================
+
+if(UNIX)
+    add_executable(
+        cluster_integration_test
+        tests/cluster_integration_test.cpp
+    )
+
+    target_link_libraries(
+        cluster_integration_test
+        PRIVATE
+        nukv_storage
+        nukv_proto
+    )
+
+    add_dependencies(
+        cluster_integration_test
+        nukv_server
+    )
+
+    add_test(
+        NAME cluster_integration_test
+        COMMAND cluster_integration_test $<TARGET_FILE:nukv_server>
+    )
+
+    set_tests_properties(
+        cluster_integration_test
+        PROPERTIES
+        LABELS integration
+        RUN_SERIAL TRUE
+        TIMEOUT 120
+    )
+endif()
