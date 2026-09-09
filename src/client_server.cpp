@@ -275,11 +275,8 @@ void ClientServer::HandleRequest(
         }
     }
 
-    connection->getLoop()->runInLoop(
-        [this, connection, response = std::move(response)]() mutable
-        {
-            SendResponse(connection, response);
-        });
+    // TcpConnection::send() owns cross-thread dispatch and payload lifetime.
+    SendResponse(connection, response);
 }
 
 void ClientServer::Enqueue(std::function<void()> task)
