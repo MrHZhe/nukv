@@ -1,12 +1,14 @@
 #pragma once
 
 #include "TimerQueue.h"
-#include "rocks_kv_store.hpp"
+#include "raft_storage.hpp"
 
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <exception>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -46,7 +48,6 @@ public:
         std::string endpoint,
         int32_t listen_port,
         std::string db_path,
-        std::string metadata_path,
         std::vector<RaftPeer> peers);
 
     ~RaftNode();
@@ -61,15 +62,10 @@ public:
     bool IsLeader() const { return leader_.load(std::memory_order_acquire); }
 
     bool Submit(const proto::Command& command);
+    bool ReadIndex();
     std::optional<std::string> GetLocal(const std::string& key) const;
 
 private:
-    struct LogEntry
-    {
-        std::uint64_t term;
-        std::string command;
-    };
-
     enum class Role
     {
         Follower,
@@ -90,6 +86,10 @@ private:
     void SendHeartbeats();
     void SendAppend(int32_t peer_id);
     void SendSnapshot(int32_t peer_id);
+    void StartNextReadIndex();
+    void SendReadIndexProbes();
+    void FinishReadIndex(bool success);
+    void FailPendingReadIndexes();
     void TryAdvanceCommit();
     void CreateSnapshotIfNeeded();
 
@@ -125,6 +125,14 @@ private:
         const TcpConnectionPtr& connection,
         const std::string& payload,
         std::uint64_t request_id);
+    void HandleReadIndexRequest(
+        const TcpConnectionPtr& connection,
+        const std::string& payload,
+        std::uint64_t request_id);
+    void HandleReadIndexResponse(
+        const TcpConnectionPtr& connection,
+        const std::string& payload,
+        std::uint64_t request_id);
     void OnPeerConnection(
         int32_t peer_id,
         const TcpConnectionPtr& connection);
@@ -137,7 +145,8 @@ private:
     std::uint64_t SendRpcToPeer(
         int32_t peer_id,
         int type,
-        const std::string& payload);
+        const std::string& payload,
+        std::uint64_t request_id = 0);
     void CreatePeerClient(int32_t peer_id);
     TcpConnectionPtr ConnectionForPeer(int32_t peer_id) const;
     void ResetPeerRpcState(
@@ -162,9 +171,6 @@ private:
     int32_t listen_port_;
     std::vector<RaftPeer> peers_;
 
-    RocksKVStore store_;
-    RocksKVStore metadata_store_;
-
     EventLoop* raft_loop_{nullptr};
     std::thread raft_thread_;
     std::unique_ptr<TcpServer> server_;
@@ -172,7 +178,10 @@ private:
     std::unordered_map<int32_t, TcpConnectionPtr> outbound_connections_;
     std::unordered_map<int32_t, TcpConnectionPtr> inbound_connections_;
 
-    std::vector<LogEntry> log_;
+    RocksKVStore store_;
+    RaftStorage raft_storage_;
+
+    std::vector<RaftLogEntry> log_;
     std::uint64_t snapshot_index_{0};
     std::uint64_t snapshot_term_{0};
     std::string snapshot_data_;
@@ -197,12 +206,25 @@ private:
     std::unordered_map<int32_t, std::uint64_t> vote_request_id_;
     std::unordered_set<int32_t> granted_votes_;
 
+    struct PendingReadIndex
+    {
+        std::uint64_t request_id;
+        std::uint64_t term;
+        std::uint64_t read_index;
+        std::unordered_set<int32_t> acknowledgements;
+        std::shared_ptr<std::promise<bool>> result;
+    };
+
+    std::deque<std::shared_ptr<PendingReadIndex>> pending_read_indexes_;
+    std::shared_ptr<PendingReadIndex> active_read_index_;
+
     std::uint64_t next_rpc_id_{1};
     std::size_t votes_received_{0};
     Role role_{Role::Follower};
 
     TimerId election_timer_;
     TimerId heartbeat_timer_;
+    TimerId read_index_timer_;
 
     std::atomic_bool ready_{false};
     std::atomic_bool leader_{false};

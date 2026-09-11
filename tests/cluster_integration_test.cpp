@@ -169,6 +169,7 @@ private:
 
 nukv::proto::ClientResponse SendRequest(
     int port,
+    std::uint64_t client_id,
     std::uint64_t request_id,
     nukv::proto::ClientRequest::Operation operation,
     const std::string& key,
@@ -199,6 +200,7 @@ nukv::proto::ClientResponse SendRequest(
     }
 
     nukv::proto::ClientRequest request;
+    request.set_client_id(client_id);
     request.set_request_id(request_id);
     request.set_operation(operation);
     request.set_key(key);
@@ -463,7 +465,25 @@ public:
     {
         return SendRequest(
             Node(id).client_port,
+            client_id_,
             next_request_id_++,
+            operation,
+            key,
+            value);
+    }
+
+    nukv::proto::ClientResponse RequestWithId(
+        int id,
+        std::uint64_t client_id,
+        std::uint64_t request_id,
+        nukv::proto::ClientRequest::Operation operation,
+        const std::string& key,
+        const std::string& value = {})
+    {
+        return SendRequest(
+            Node(id).client_port,
+            client_id,
+            request_id,
             operation,
             key,
             value);
@@ -549,11 +569,9 @@ public:
                 "node " + std::to_string(node.id) +
                     " has invalid persisted snapshot metadata");
 
-            nukv::RocksKVStore metadata_store(
-                (node.data_directory / "raft_meta").string());
             const std::uint64_t suffix_index =
                 snapshot_metadata.last_included_index() + 1;
-            const auto suffix = metadata_store.Get(
+            const auto suffix = store.Get(
                 "__raft/log/" + std::to_string(suffix_index));
             Require(
                 suffix.has_value(),
@@ -624,6 +642,7 @@ private:
     std::filesystem::path root_directory_;
     std::string peers_;
     std::array<NodeProcess, kNodeCount> nodes_{};
+    const std::uint64_t client_id_{1};
     std::uint64_t next_request_id_{1};
 };
 
@@ -683,6 +702,38 @@ void RunTest(Cluster& cluster)
             "before-failover"),
         nukv::proto::ClientResponse::STATUS_OK,
         "put");
+
+    const auto replayed_put = cluster.RequestWithId(
+        first_leader,
+        42,
+        9001,
+        nukv::proto::ClientRequest::OPERATION_PUT,
+        "integration/deduplicated",
+        "first");
+    ExpectStatus(
+        replayed_put,
+        nukv::proto::ClientResponse::STATUS_OK,
+        "first deduplicated put");
+    ExpectStatus(
+        cluster.RequestWithId(
+            first_leader,
+            42,
+            9001,
+            nukv::proto::ClientRequest::OPERATION_PUT,
+            "integration/deduplicated",
+            "first"),
+        nukv::proto::ClientResponse::STATUS_OK,
+        "replayed deduplicated put");
+    ExpectStatus(
+        cluster.RequestWithId(
+            first_leader,
+            42,
+            9001,
+            nukv::proto::ClientRequest::OPERATION_PUT,
+            "integration/deduplicated",
+            "second"),
+        nukv::proto::ClientResponse::STATUS_ERROR,
+        "request id reused with a different command");
 
     auto response = cluster.Request(
         first_leader,

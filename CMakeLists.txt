@@ -28,42 +28,6 @@ find_library(
     REQUIRED
 )
 
-add_executable(
-    rocksdb_smoke
-    src/rocksdb_smoke.cpp
-)
-
-target_include_directories(
-    rocksdb_smoke
-    PRIVATE
-    ${ROCKSDB_INCLUDE_DIR}
-)
-
-target_link_libraries(
-    rocksdb_smoke
-    PRIVATE
-    ${ROCKSDB_LIBRARY}
-    Threads::Threads
-)
-
-add_executable(
-    rocksdb_read
-    src/rocksdb_read.cpp
-)
-
-target_include_directories(
-    rocksdb_read
-    PRIVATE
-    ${ROCKSDB_INCLUDE_DIR}
-)
-
-target_link_libraries(
-    rocksdb_read
-    PRIVATE
-    ${ROCKSDB_LIBRARY}
-    Threads::Threads
-)
-
 add_library(
     nukv_storage
     src/rocks_kv_store.cpp
@@ -203,6 +167,7 @@ add_dependencies(
 add_library(
     nukv_raft
     src/raft_node.cpp
+    src/raft_storage.cpp
 )
 
 target_include_directories(

@@ -49,6 +49,7 @@ message SnapshotEntry {
 
 message SnapshotState {
   repeated SnapshotEntry entries = 1;
+  repeated SnapshotEntry applied_requests = 2;
 }
 
 message InstallSnapshotRequest {
@@ -68,6 +69,17 @@ message InstallSnapshotResponse {
   uint64 next_offset = 4;
 }
 
+message ReadIndexRequest {
+  uint64 term = 1;
+  uint64 leader_id = 2;
+}
+
+message ReadIndexResponse {
+  uint64 term = 1;
+  bool success = 2;
+  uint64 responder_id = 3;
+}
+
 message RaftRpc {
   enum Type {
     TYPE_UNSPECIFIED = 0;
@@ -78,6 +90,8 @@ message RaftRpc {
     IDENTIFY = 5;
     INSTALL_SNAPSHOT = 6;
     INSTALL_SNAPSHOT_RESPONSE = 7;
+    READ_INDEX = 8;
+    READ_INDEX_RESPONSE = 9;
   }
 
   Type type = 1;

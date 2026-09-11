@@ -11,10 +11,15 @@ class CommandApplier
 {
 public:
     explicit CommandApplier(RocksKVStore& store);
-    
+
     void Apply(const proto::Command& command);
 
-    void ApplyAtomically(const proto::Command& command,std::uint64_t log_idx);
+    bool IsApplied(const proto::Command& command) const;
+
+    void ApplyAtomically(
+        const proto::Command& command,
+        std::uint64_t log_idx,
+        std::uint64_t commit_index);
 private:
     RocksKVStore& store_;
 };

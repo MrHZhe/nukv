@@ -30,16 +30,11 @@ public:
         const std::vector<std::pair<std::string, std::string>>& puts,
         const std::vector<std::string>& deletes);
     std::vector<std::pair<std::string, std::string>> GetAllUserEntries() const;
+    std::vector<std::pair<std::string, std::string>> GetAllPrefixedEntries(
+        const std::string& prefix) const;
 
 
-    void SaveSnapshotAtomically(const std::string& metadata, const std::string& data);
     std::optional<std::pair<std::string, std::string>> LoadSnapshot() const;
-
-    void ApplySnapshotAtomically(
-    const std::vector<std::pair<std::string, std::string>>& entries,
-    std::uint64_t last_commit_index,
-    const std::string& metadata,
-    const std::string& data);
 
 private:
     std::string db_path_;

@@ -16,6 +16,7 @@ message ClientRequest
     Operation operation = 2;
     bytes key = 3;
     bytes value = 4;
+    uint64 client_id = 5;
 }
 
 message ClientResponse

@@ -71,102 +71,6 @@ std::pair<std::string, int> ParseEndpoint(const std::string& endpoint)
     return {endpoint.substr(0, separator), port};
 }
 
-std::uint64_t ParseUint64(
-    const std::optional<std::string>& value,
-    const std::string& key)
-{
-    if (!value.has_value())
-    {
-        return 0;
-    }
-
-    std::size_t parsed = 0;
-    const std::uint64_t result = std::stoull(value.value(), &parsed);
-    if (parsed != value->size())
-    {
-        throw std::runtime_error("invalid persisted Raft value: " + key);
-    }
-    return result;
-}
-
-std::int64_t ParseInt64(
-    const std::optional<std::string>& value,
-    const std::string& key)
-{
-    if (!value.has_value())
-    {
-        return -1;
-    }
-
-    std::size_t parsed = 0;
-    const std::int64_t result = std::stoll(value.value(), &parsed);
-    if (parsed != value->size())
-    {
-        throw std::runtime_error("invalid persisted Raft value: " + key);
-    }
-    return result;
-}
-
-std::string SerializeSnapshotMetadata(
-    std::uint64_t last_included_index,
-    std::uint64_t last_included_term)
-{
-    nukv::proto::SnapshotMetadata metadata;
-    metadata.set_last_included_index(last_included_index);
-    metadata.set_last_included_term(last_included_term);
-
-    std::string serialized;
-    if (!metadata.SerializeToString(&serialized))
-    {
-        throw std::runtime_error("failed to serialize Raft snapshot metadata");
-    }
-    return serialized;
-}
-
-std::string SerializeSnapshotState(
-    const std::vector<std::pair<std::string, std::string>>& entries)
-{
-    nukv::proto::SnapshotState state;
-    for (const auto& [key, value] : entries)
-    {
-        auto* entry = state.add_entries();
-        entry->set_key(key);
-        entry->set_value(value);
-    }
-
-    std::string serialized;
-    if (!state.SerializeToString(&serialized))
-    {
-        throw std::runtime_error("failed to serialize Raft snapshot state");
-    }
-    return serialized;
-}
-
-std::vector<std::pair<std::string, std::string>> ParseSnapshotState(
-    const std::string& serialized)
-{
-    nukv::proto::SnapshotState state;
-    if (!state.ParseFromString(serialized))
-    {
-        throw std::runtime_error("invalid Raft snapshot state");
-    }
-
-    std::vector<std::pair<std::string, std::string>> entries;
-    entries.reserve(state.entries_size());
-    std::unordered_set<std::string> keys;
-    keys.reserve(state.entries_size());
-
-    for (const auto& entry : state.entries())
-    {
-        if (entry.key().rfind("__raft/", 0) == 0 ||
-            !keys.insert(entry.key()).second)
-        {
-            throw std::runtime_error("invalid Raft snapshot key set");
-        }
-        entries.emplace_back(entry.key(), entry.value());
-    }
-    return entries;
-}
 }
 
 namespace nukv
@@ -176,14 +80,13 @@ RaftNode::RaftNode(
     std::string endpoint,
     int32_t listen_port,
     std::string db_path,
-    std::string metadata_path,
     std::vector<RaftPeer> peers)
     : server_id_(server_id)
     , endpoint_(std::move(endpoint))
     , listen_port_(listen_port)
     , peers_(std::move(peers))
     , store_(std::move(db_path))
-    , metadata_store_(std::move(metadata_path))
+    , raft_storage_(store_)
 {
 }
 
@@ -226,65 +129,15 @@ std::size_t RaftNode::LogOffset(std::uint64_t index) const
 
 void RaftNode::LoadState()
 {
-    snapshot_index_ = 0;
-    snapshot_term_ = 0;
-    snapshot_data_.clear();
-
-    const auto persisted_snapshot = store_.LoadSnapshot();
-    if (persisted_snapshot.has_value())
-    {
-        proto::SnapshotMetadata metadata;
-        if (!metadata.ParseFromString(persisted_snapshot->first) ||
-            metadata.last_included_index() == 0 ||
-            metadata.last_included_term() == 0)
-        {
-            throw std::runtime_error("invalid persisted Raft snapshot metadata");
-        }
-        ParseSnapshotState(persisted_snapshot->second);
-        snapshot_index_ = metadata.last_included_index();
-        snapshot_term_ = metadata.last_included_term();
-        snapshot_data_ = persisted_snapshot->second;
-    }
-
-    current_term_ = ParseUint64(
-        metadata_store_.Get("__raft/current_term"),
-        "__raft/current_term");
-    voted_for_ = ParseInt64(
-        metadata_store_.Get("__raft/voted_for"),
-        "__raft/voted_for");
-    commit_index_ = ParseUint64(
-        metadata_store_.Get("__raft/commit_index"),
-        "__raft/commit_index");
-    last_applied_ = ParseUint64(
-        metadata_store_.Get("__raft/last_applied"),
-        "__raft/last_applied");
-
-    commit_index_ = std::max(commit_index_, snapshot_index_);
-    last_applied_ = std::max(last_applied_, snapshot_index_);
-
-    log_.clear();
-    for (std::uint64_t index = snapshot_index_ + 1; ; ++index)
-    {
-        const auto serialized = metadata_store_.Get(
-            "__raft/log/" + std::to_string(index));
-        if (!serialized.has_value())
-        {
-            break;
-        }
-
-        proto::RaftLogEntry entry;
-        if (!entry.ParseFromString(serialized.value()) ||
-            entry.index() != index)
-        {
-            throw std::runtime_error("corrupted persisted Raft log");
-        }
-
-        log_.push_back({entry.term(), entry.command()});
-        if (index == std::numeric_limits<std::uint64_t>::max())
-        {
-            throw std::runtime_error("Raft log index overflow");
-        }
-    }
+    const PersistedRaftState state = raft_storage_.Load();
+    snapshot_index_ = state.snapshot_index;
+    snapshot_term_ = state.snapshot_term;
+    snapshot_data_ = state.snapshot_data;
+    current_term_ = state.current_term;
+    voted_for_ = state.voted_for;
+    commit_index_ = std::max(state.commit_index, snapshot_index_);
+    last_applied_ = std::max(state.last_applied, snapshot_index_);
+    log_ = state.log;
 
     commit_index_ = std::min(commit_index_, LastIndex());
     last_applied_ = std::min(last_applied_, commit_index_);
@@ -293,61 +146,18 @@ void RaftNode::LoadState()
 
 void RaftNode::PersistState()
 {
-    metadata_store_.WriteAtomically(
-        {
-            {"__raft/current_term", std::to_string(current_term_)},
-            {"__raft/voted_for", std::to_string(voted_for_)},
-            {"__raft/commit_index", std::to_string(commit_index_)},
-            {"__raft/last_applied", std::to_string(last_applied_)},
-            {"__raft/snapshot_index", std::to_string(snapshot_index_)},
-            {"__raft/snapshot_term", std::to_string(snapshot_term_)}
-        },
-        {});
+    raft_storage_.PersistState(
+        current_term_,
+        voted_for_,
+        commit_index_,
+        last_applied_,
+        snapshot_index_,
+        snapshot_term_);
 }
 
 void RaftNode::PersistLog()
 {
-    std::vector<std::pair<std::string, std::string>> puts;
-    puts.reserve(log_.size());
-
-    for (std::size_t offset = 0; offset < log_.size(); ++offset)
-    {
-        proto::RaftLogEntry entry;
-        entry.set_index(snapshot_index_ + static_cast<std::uint64_t>(offset + 1));
-        entry.set_term(log_[offset].term);
-        entry.set_command(log_[offset].command);
-
-        std::string serialized;
-        if (!entry.SerializeToString(&serialized))
-        {
-            throw std::runtime_error("failed to serialize Raft log entry");
-        }
-        puts.emplace_back(
-            "__raft/log/" +
-                std::to_string(snapshot_index_ +
-                               static_cast<std::uint64_t>(offset + 1)),
-            std::move(serialized));
-    }
-
-    std::vector<std::string> deletes;
-    for (std::uint64_t index = 1; index <= snapshot_index_; ++index)
-    {
-        deletes.push_back("__raft/log/" + std::to_string(index));
-    }
-    for (std::uint64_t index = LastIndex() + 1; ; ++index)
-    {
-        const std::string key = "__raft/log/" + std::to_string(index);
-        if (!metadata_store_.Get(key).has_value())
-        {
-            break;
-        }
-        deletes.push_back(key);
-    }
-
-    if (!puts.empty() || !deletes.empty())
-    {
-        metadata_store_.WriteAtomically(puts, deletes);
-    }
+    raft_storage_.PersistLog(snapshot_index_, log_);
 }
 
 void RaftNode::Start()
@@ -536,6 +346,7 @@ void RaftNode::StopInLoop()
         raft_loop_->cancel(heartbeat_timer_);
         heartbeat_timer_ = TimerId();
     }
+    FailPendingReadIndexes();
     ready_.store(false, std::memory_order_release);
     leader_.store(false, std::memory_order_release);
     server_.reset();
@@ -695,6 +506,7 @@ void RaftNode::StepDown(std::uint64_t term)
     }
     role_ = Role::Follower;
     leader_.store(false, std::memory_order_release);
+    FailPendingReadIndexes();
     ResetElectionTimer();
 }
 
@@ -748,7 +560,123 @@ void RaftNode::SendHeartbeats()
         [this]()
         {
             SendHeartbeats();
+    });
+}
+
+void RaftNode::StartNextReadIndex()
+{
+    if (active_read_index_ ||
+        pending_read_indexes_.empty())
+    {
+        return;
+    }
+    if (role_ != Role::Leader || stopping_)
+    {
+        FailPendingReadIndexes();
+        return;
+    }
+
+    active_read_index_ = pending_read_indexes_.front();
+    pending_read_indexes_.pop_front();
+    active_read_index_->term = current_term_;
+    active_read_index_->read_index = commit_index_;
+    active_read_index_->acknowledgements.clear();
+    active_read_index_->acknowledgements.insert(server_id_);
+
+    const std::size_t quorum = peers_.size() / 2 + 1;
+    if (active_read_index_->acknowledgements.size() >= quorum)
+    {
+        FinishReadIndex(true);
+        return;
+    }
+
+    SendReadIndexProbes();
+    const auto active = active_read_index_;
+    read_index_timer_ = raft_loop_->runAfter(
+        0.35,
+        [this, active]()
+        {
+            if (active_read_index_ == active)
+            {
+                FinishReadIndex(false);
+            }
         });
+}
+
+void RaftNode::SendReadIndexProbes()
+{
+    if (!active_read_index_ ||
+        role_ != Role::Leader ||
+        active_read_index_->term != current_term_)
+    {
+        return;
+    }
+
+    proto::ReadIndexRequest request;
+    request.set_term(current_term_);
+    request.set_leader_id(server_id_);
+    std::string payload;
+    if (!request.SerializeToString(&payload))
+    {
+        FinishReadIndex(false);
+        return;
+    }
+
+    for (const RaftPeer& peer : peers_)
+    {
+        if (peer.id != server_id_)
+        {
+            SendRpcToPeer(
+                peer.id,
+                proto::RaftRpc::READ_INDEX,
+                payload,
+                active_read_index_->request_id);
+        }
+    }
+}
+
+void RaftNode::FinishReadIndex(bool success)
+{
+    if (!active_read_index_)
+    {
+        return;
+    }
+    if (read_index_timer_.valid())
+    {
+        raft_loop_->cancel(read_index_timer_);
+        read_index_timer_ = TimerId();
+    }
+
+    const auto active = active_read_index_;
+    active_read_index_.reset();
+    if (success &&
+        role_ == Role::Leader &&
+        current_term_ == active->term)
+    {
+        ApplyCommitted();
+        success = last_applied_ >= active->read_index;
+    }
+    active->result->set_value(success);
+    StartNextReadIndex();
+}
+
+void RaftNode::FailPendingReadIndexes()
+{
+    if (read_index_timer_.valid())
+    {
+        raft_loop_->cancel(read_index_timer_);
+        read_index_timer_ = TimerId();
+    }
+    if (active_read_index_)
+    {
+        active_read_index_->result->set_value(false);
+        active_read_index_.reset();
+    }
+    while (!pending_read_indexes_.empty())
+    {
+        pending_read_indexes_.front()->result->set_value(false);
+        pending_read_indexes_.pop_front();
+    }
 }
 
 void RaftNode::SendAppend(int32_t peer_id)
@@ -783,7 +711,7 @@ void RaftNode::SendAppend(int32_t peer_id)
          index < next + kMaxEntriesPerRpc;
          ++index)
     {
-        const LogEntry& source = log_[LogOffset(index)];
+        const RaftLogEntry& source = log_[LogOffset(index)];
         auto* entry = request.add_entries();
         entry->set_index(index);
         entry->set_term(source.term);
@@ -1138,6 +1066,18 @@ void RaftNode::HandleRpc(
                     rpc.payload(),
                     rpc.request_id());
                 break;
+            case proto::RaftRpc::READ_INDEX:
+                HandleReadIndexRequest(
+                    connection,
+                    rpc.payload(),
+                    rpc.request_id());
+                break;
+            case proto::RaftRpc::READ_INDEX_RESPONSE:
+                HandleReadIndexResponse(
+                    connection,
+                    rpc.payload(),
+                    rpc.request_id());
+                break;
             case proto::RaftRpc::TYPE_UNSPECIFIED:
             default:
                 connection->shutdown();
@@ -1423,17 +1363,10 @@ void RaftNode::HandleInstallSnapshot(
                 {
                     try
                     {
-                        const auto entries =
+                        const SnapshotContents snapshot =
                             ParseSnapshotState(incoming_snapshot_data_);
-                        store_.ApplySnapshotAtomically(
-                            entries,
-                            incoming_snapshot_index_,
-                            SerializeSnapshotMetadata(
-                                incoming_snapshot_index_,
-                                incoming_snapshot_term_),
-                            incoming_snapshot_data_);
 
-                        std::vector<LogEntry> suffix;
+                        std::vector<RaftLogEntry> suffix;
                         if (incoming_snapshot_index_ <= LastIndex() &&
                             TermAt(incoming_snapshot_index_) ==
                                 incoming_snapshot_term_)
@@ -1447,16 +1380,24 @@ void RaftNode::HandleInstallSnapshot(
                                 log_.end());
                         }
 
+                        const std::uint64_t new_commit_index =
+                            std::max(commit_index_, incoming_snapshot_index_);
+                        raft_storage_.ApplySnapshot(
+                            snapshot,
+                            current_term_,
+                            voted_for_,
+                            new_commit_index,
+                            incoming_snapshot_index_,
+                            incoming_snapshot_index_,
+                            incoming_snapshot_term_,
+                            suffix);
+
                         snapshot_index_ = incoming_snapshot_index_;
                         snapshot_term_ = incoming_snapshot_term_;
                         snapshot_data_ = incoming_snapshot_data_;
                         log_ = std::move(suffix);
-                        commit_index_ = std::max(
-                            commit_index_,
-                            snapshot_index_);
+                        commit_index_ = new_commit_index;
                         last_applied_ = snapshot_index_;
-                        PersistState();
-                        PersistLog();
                         ApplyCommitted();
 
                         next_offset = incoming_snapshot_data_.size();
@@ -1560,6 +1501,87 @@ void RaftNode::HandleInstallSnapshotResponse(
     SendAppend(peer_id);
 }
 
+void RaftNode::HandleReadIndexRequest(
+    const TcpConnectionPtr& connection,
+    const std::string& payload,
+    std::uint64_t request_id)
+{
+    proto::ReadIndexRequest request;
+    if (!request.ParseFromString(payload))
+    {
+        connection->shutdown();
+        return;
+    }
+
+    proto::ReadIndexResponse response;
+    response.set_responder_id(server_id_);
+    if (request.term() < current_term_)
+    {
+        response.set_term(current_term_);
+        response.set_success(false);
+    }
+    else
+    {
+        if (request.term() > current_term_ ||
+            role_ != Role::Follower)
+        {
+            StepDown(request.term());
+        }
+        ResetElectionTimer();
+        response.set_term(current_term_);
+        response.set_success(request.term() == current_term_);
+    }
+
+    std::string response_payload;
+    if (response.SerializeToString(&response_payload))
+    {
+        SendRpc(
+            connection,
+            proto::RaftRpc::READ_INDEX_RESPONSE,
+            response_payload,
+            request_id);
+    }
+}
+
+void RaftNode::HandleReadIndexResponse(
+    const TcpConnectionPtr& connection,
+    const std::string& payload,
+    std::uint64_t request_id)
+{
+    proto::ReadIndexResponse response;
+    if (!response.ParseFromString(payload))
+    {
+        return;
+    }
+    if (response.term() > current_term_)
+    {
+        StepDown(response.term());
+        return;
+    }
+    if (!active_read_index_ ||
+        role_ != Role::Leader ||
+        response.term() != current_term_ ||
+        request_id != active_read_index_->request_id)
+    {
+        return;
+    }
+
+    const int32_t peer_id =
+        static_cast<int32_t>(response.responder_id());
+    if (next_index_.find(peer_id) == next_index_.end() ||
+        ConnectionForPeer(peer_id) != connection ||
+        !response.success())
+    {
+        return;
+    }
+    active_read_index_->acknowledgements.insert(peer_id);
+    if (active_read_index_->acknowledgements.size() >=
+        peers_.size() / 2 + 1)
+    {
+        FinishReadIndex(true);
+    }
+}
+
 void RaftNode::HandleAppendEntriesResponse(
     const TcpConnectionPtr& connection,
     const std::string& payload,
@@ -1635,6 +1657,10 @@ void RaftNode::OnPeerConnection(
         {
             SendRequestVoteToPeer(peer_id);
         }
+        if (active_read_index_)
+        {
+            SendReadIndexProbes();
+        }
         SendRpc(connection, proto::RaftRpc::IDENTIFY, {});
     }
     else
@@ -1682,7 +1708,8 @@ std::uint64_t RaftNode::SendRpc(
 std::uint64_t RaftNode::SendRpcToPeer(
     int32_t peer_id,
     int type,
-    const std::string& payload)
+    const std::string& payload,
+    std::uint64_t request_id)
 {
     const TcpConnectionPtr connection = ConnectionForPeer(peer_id);
     if (!connection || !connection->connected())
@@ -1690,7 +1717,7 @@ std::uint64_t RaftNode::SendRpcToPeer(
         return 0;
     }
 
-    return SendRpc(connection, type, payload);
+    return SendRpc(connection, type, payload, request_id);
 }
 
 void RaftNode::ApplyCommitted()
@@ -1702,13 +1729,16 @@ void RaftNode::ApplyCommitted()
     }
     while (last_applied_ < commit_index_)
     {
-        const LogEntry& entry = log_[LogOffset(last_applied_ + 1)];
+        const RaftLogEntry& entry = log_[LogOffset(last_applied_ + 1)];
         proto::Command command;
         if (!command.ParseFromString(entry.command))
         {
             throw std::runtime_error("invalid committed Raft command");
         }
-        applier.ApplyAtomically(command, last_applied_ + 1);
+        applier.ApplyAtomically(
+            command,
+            last_applied_ + 1,
+            commit_index_);
         ++last_applied_;
     }
     PersistState();
@@ -1736,26 +1766,39 @@ void RaftNode::CreateSnapshotIfNeeded()
         }
 
         const auto entries = store_.GetAllUserEntries();
+        const auto applied_requests = raft_storage_.GetAppliedRequests();
         const std::string metadata = SerializeSnapshotMetadata(
             new_snapshot_index,
             new_snapshot_term);
-        const std::string data = SerializeSnapshotState(entries);
-
-        store_.SaveSnapshotAtomically(metadata, data);
+        const std::string data =
+            SerializeSnapshotState(entries, applied_requests);
 
         const std::size_t erase_count = static_cast<std::size_t>(
             new_snapshot_index - snapshot_index_);
-        snapshot_index_ = new_snapshot_index;
-        snapshot_term_ = new_snapshot_term;
-        snapshot_data_ = data;
         if (erase_count > log_.size())
         {
             throw std::runtime_error("snapshot exceeds retained Raft log");
         }
-        log_.erase(log_.begin(), log_.begin() + erase_count);
+        std::vector<RaftLogEntry> suffix(
+            log_.begin() + erase_count,
+            log_.end());
 
-        PersistState();
-        PersistLog();
+        raft_storage_.PersistSnapshot(
+            current_term_,
+            voted_for_,
+            commit_index_,
+            last_applied_,
+            new_snapshot_index,
+            new_snapshot_term,
+            metadata,
+            data,
+            suffix);
+
+        snapshot_index_ = new_snapshot_index;
+        snapshot_term_ = new_snapshot_term;
+        snapshot_data_ = data;
+        log_ = std::move(suffix);
+
     }
     catch (...)
     {
@@ -1777,9 +1820,15 @@ bool RaftNode::Submit(const proto::Command& command)
 
     auto result = std::make_shared<std::promise<bool>>();
     std::future<bool> future = result->get_future();
+    const std::uint64_t client_id = command.client_id();
+    const std::uint64_t request_id = command.request_id();
 
     raft_loop_->queueInLoop(
-        [this, serialized = std::move(serialized), result]()
+        [this,
+         serialized = std::move(serialized),
+         client_id,
+         request_id,
+         result]()
         {
             try
             {
@@ -1787,6 +1836,17 @@ bool RaftNode::Submit(const proto::Command& command)
                 {
                     result->set_value(false);
                     return;
+                }
+
+                if (request_id != 0)
+                {
+                    const auto applied =
+                        raft_storage_.GetAppliedCommand(client_id, request_id);
+                    if (applied.has_value())
+                    {
+                        result->set_value(applied.value() == serialized);
+                        return;
+                    }
                 }
 
                 log_.push_back({current_term_, serialized});
@@ -1825,6 +1885,39 @@ bool RaftNode::Submit(const proto::Command& command)
             {
                 result->set_value(false);
             }
+        });
+
+    if (future.wait_for(std::chrono::seconds(2)) !=
+        std::future_status::ready)
+    {
+        return false;
+    }
+    return future.get();
+}
+
+bool RaftNode::ReadIndex()
+{
+    if (raft_loop_ == nullptr || !IsReady())
+    {
+        return false;
+    }
+
+    auto result = std::make_shared<std::promise<bool>>();
+    std::future<bool> future = result->get_future();
+    raft_loop_->queueInLoop(
+        [this, result]()
+        {
+            if (role_ != Role::Leader || stopping_)
+            {
+                result->set_value(false);
+                return;
+            }
+
+            auto request = std::make_shared<PendingReadIndex>();
+            request->request_id = next_rpc_id_++;
+            request->result = result;
+            pending_read_indexes_.push_back(std::move(request));
+            StartNextReadIndex();
         });
 
     if (future.wait_for(std::chrono::seconds(2)) !=

@@ -377,7 +377,6 @@ int main(int argc, char* argv[])
             local_peer.endpoint,
             raft_port,
             options.data_directory + "/state_db",
-            options.data_directory + "/raft_meta",
             options.peers);
 
         node.Start();

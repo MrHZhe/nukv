@@ -203,6 +203,7 @@ void ClientServer::HandleRequest(
             {
                 case proto::ClientRequest::OPERATION_PUT:
                     command.set_type(proto::COMMAND_TYPE_PUT);
+                    command.set_client_id(request.client_id());
                     if (node_.Submit(command))
                     {
                         response.set_status(proto::ClientResponse::STATUS_OK);
@@ -217,13 +218,12 @@ void ClientServer::HandleRequest(
                     break;
 
                 case proto::ClientRequest::OPERATION_GET:
-                    command.set_type(proto::COMMAND_TYPE_GET);
-                    if (!node_.Submit(command))
+                    if (!node_.ReadIndex())
                     {
                         response = MakeError(
                             request.request_id(),
                             proto::ClientResponse::STATUS_ERROR,
-                            "get failed");
+                            "linearizable read failed");
                         break;
                     }
 
@@ -244,6 +244,7 @@ void ClientServer::HandleRequest(
 
                 case proto::ClientRequest::OPERATION_DELETE:
                     command.set_type(proto::COMMAND_TYPE_DELETE);
+                    command.set_client_id(request.client_id());
                     if (node_.Submit(command))
                     {
                         response.set_status(proto::ClientResponse::STATUS_OK);
