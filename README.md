@@ -123,13 +123,17 @@ cd build
 ctest --output-on-failure
 ```
 
-The suite covers RocksDB persistence, Protobuf serialization, and a Linux-only
-three-node integration test. The integration test automatically chooses free
-ports and temporary data directories, then cleans up all child processes.
+The suite currently contains three CTest cases: RocksDB persistence, Protobuf
+serialization, and a Linux-only three-node integration test. The integration
+test automatically chooses free ports and temporary data directories, then
+cleans up all child processes.
 
 The cluster test covers Leader election, Follower rejection, `Put`/`Get`/
 `Delete`, key validation, a 64 KiB value, Leader termination and re-election,
-restarted-node log catch-up, and final RocksDB replica consistency.
+restart recovery, log conflict repair, snapshot creation and log-prefix
+compaction, a 384 KiB value that exercises multi-chunk `InstallSnapshot`,
+follower snapshot catch-up, post-snapshot log-tail recovery, and final RocksDB
+replica consistency.
 
 ## Raft implementation
 
@@ -145,12 +149,14 @@ RPCs use length-prefixed Protobuf messages over mymuduo `TcpClient` and
 The build completes successfully and CTest reports:
 
 ```text
-100% tests passed out of 3
+100% tests passed, 0 tests failed out of 3
 ```
 
-The three-node integration test also passed three consecutive repeat runs. It
-uses isolated temporary state and does not modify the repository's default
-`data/` directory.
+The three-node integration test has also passed three consecutive repeat runs.
+It uses isolated temporary state and does not modify the repository's default
+`data/` directory. The current tests do not yet provide exhaustive malformed
+RPC, concurrent-client, cross-machine, or long-running fault-injection
+coverage.
 
 ## Scope and limitations
 
