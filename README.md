@@ -21,12 +21,12 @@ so Raft submission and storage access do not block the network event loop.
 ## Project structure
 
 ```text
-include/nukv/              public service, Raft, and storage headers
+include/                   public service, Raft, and storage headers
 src/main.cpp               server entry point and CLI configuration
 src/client_server.cpp      TCP framing, Protobuf parsing, client replies
 src/raft_node.cpp          Raft state machine, RPC, persistence, and replication
 src/command_applier.cpp    deterministic command application
-src/storage/               RocksDB key-value wrapper
+src/rocks_kv_store.cpp     RocksDB key-value wrapper
 proto/                     client.proto, command.proto, and raft.proto
 tests/                     unit tests and cluster integration test
 third_party/mymuduo/       bundled mymuduo submodule

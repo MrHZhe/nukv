@@ -1,7 +1,7 @@
 #pragma once
 
 #include "TimerQueue.h"
-#include "nukv/storage/rocks_kv_store.hpp"
+#include "rocks_kv_store.hpp"
 
 #include <atomic>
 #include <condition_variable>

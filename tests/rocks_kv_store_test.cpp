@@ -1,4 +1,4 @@
-#include <nukv/storage/rocks_kv_store.hpp>
+#include <rocks_kv_store.hpp>
 
 #include <cassert>
 #include <filesystem>

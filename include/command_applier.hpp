@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nukv/storage/rocks_kv_store.hpp"
+#include "rocks_kv_store.hpp"
 #include "command.pb.h"
 
 #include <cstdint>

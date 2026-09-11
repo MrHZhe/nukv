@@ -1,4 +1,4 @@
-#include <nukv/storage/rocks_kv_store.hpp>
+#include <rocks_kv_store.hpp>
 
 #include <rocksdb/db.h>
 #include <rocksdb/write_batch.h>

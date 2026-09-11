@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nukv/raft_node.hpp"
+#include "raft_node.hpp"
 
 #include <condition_variable>
 #include <deque>

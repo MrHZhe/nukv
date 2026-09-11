@@ -66,7 +66,7 @@ target_link_libraries(
 
 add_library(
     nukv_storage
-    src/storage/rocks_kv_store.cpp
+    src/rocks_kv_store.cpp
 )
 
 target_include_directories(

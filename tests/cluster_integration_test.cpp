@@ -1,6 +1,6 @@
 #include "client.pb.h"
 #include "raft.pb.h"
-#include "nukv/storage/rocks_kv_store.hpp"
+#include "rocks_kv_store.hpp"
 
 #include <arpa/inet.h>
 #include <fcntl.h>

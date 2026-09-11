@@ -1,4 +1,4 @@
-#include "nukv/raft_node.hpp"
+#include "raft_node.hpp"
 
 #include "Buffer.h"
 #include "EventLoop.h"
@@ -8,7 +8,7 @@
 #include "TcpServer.h"
 #include "Timestamp.h"
 #include "command.pb.h"
-#include "nukv/command_applier.hpp"
+#include "command_applier.hpp"
 #include "raft.pb.h"
 
 #include <arpa/inet.h>
