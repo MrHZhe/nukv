@@ -73,9 +73,10 @@ cmake --build build --parallel
 If the default `cmake` is older than 3.22, select a newer binary explicitly,
 for example `/snap/bin/cmake` on the development VM.
 
-## Run A Local Three-Node Cluster
+## Run A Local Cluster
 
-Run each command in a separate terminal:
+The default configuration starts a three-node cluster. Run each command in a
+separate terminal:
 
 ```bash
 ./build/nukv_server 1
@@ -97,6 +98,19 @@ PEERS='1=127.0.0.1:19001,2=127.0.0.1:19002,3=127.0.0.1:19003'
 
 The explicit form is required with custom peer addresses and prevents reusing
 persisted data from another cluster.
+
+The server accepts any statically configured peer list, not only three nodes.
+For example, a five-node cluster can use:
+
+```bash
+PEERS='1=127.0.0.1:19001,2=127.0.0.1:19002,3=127.0.0.1:19003,4=127.0.0.1:19004,5=127.0.0.1:19005'
+./build/nukv_server --node-id 1 --peers "$PEERS" --client-port 18001 --data-dir ./data/node1
+```
+
+Start one process per peer, using the same complete `--peers` value and a
+different `--node-id`, client port, and data directory for each process.
+Majority calculations use the configured peer count. Membership changes after
+startup are not implemented yet.
 
 ### Configuration Files
 
@@ -171,14 +185,15 @@ The build completes successfully and CTest reports:
 
 The three-node integration test uses isolated temporary state and does not
 modify the repository's default `data/` directory. The current tests do not
-yet provide exhaustive malformed RPC, concurrent-client, cross-machine, or
-long-running fault-injection coverage.
+yet provide exhaustive malformed RPC, arbitrary-cluster-size, concurrent-client,
+cross-machine, or long-running fault-injection coverage.
 
 ## Scope And Limitations
 
 NuKV is a project-level distributed-storage implementation intended for
-learning and interviews. The current test topology is a same-machine
-three-node cluster. Snapshot creation, log-prefix compaction, restart
+learning and interviews. The current integration-test topology is a
+same-machine three-node cluster, while the server accepts any statically
+configured peer count. Snapshot creation, log-prefix compaction, restart
 recovery, and follower catch-up through `InstallSnapshot` are implemented and
 covered by the integration test, including a snapshot larger than one
 transport chunk.

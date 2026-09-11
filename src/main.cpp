@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -41,8 +42,8 @@ void PrintUsage()
         << "  nukv_server --node-id <id> [options]\n\n"
         << "Options:\n"
         << "  --config <path>\n"
-        << "  --node-id <1|2|3>\n"
-        << "  --peers <id=host:port,id=host:port,id=host:port>\n"
+        << "  --node-id <id>\n"
+        << "  --peers <id=host:port,...>\n"
         << "  --client-port <port>\n"
         << "  --data-dir <path>\n"
         << "  --help\n\n"
@@ -107,9 +108,10 @@ std::vector<nukv::RaftPeer> ParsePeers(const std::string& value)
         const int id = ParseInteger(item.substr(0, separator), "peer id");
         const std::string endpoint = item.substr(separator + 1);
 
-        if (id < 1 || id > 3 || !ids.insert(id).second)
+        if (id < 1 || !ids.insert(id).second)
         {
-            throw std::invalid_argument("peer ids must be unique values 1, 2, or 3");
+            throw std::invalid_argument(
+                "peer ids must be unique positive integers");
         }
 
         const std::size_t colon = endpoint.rfind(':');
@@ -127,9 +129,9 @@ std::vector<nukv::RaftPeer> ParsePeers(const std::string& value)
         begin = end + 1;
     }
 
-    if (peers.size() != 3 || ids.size() != 3)
+    if (peers.empty())
     {
-        throw std::invalid_argument("exactly three peers are required");
+        throw std::invalid_argument("at least one peer is required");
     }
 
     return peers;
@@ -314,13 +316,20 @@ ServerOptions ParseOptions(int argc, char* argv[])
         ++index;
     }
 
-    if (!node_id_set || options.node_id < 1 || options.node_id > 3)
+    if (!node_id_set || options.node_id < 1)
     {
-        throw std::invalid_argument("node_id must be 1, 2, or 3");
+        throw std::invalid_argument("node_id must be a positive integer");
     }
 
     if (!client_port_set)
     {
+        if (options.node_id >
+            std::numeric_limits<int>::max() - 18000 ||
+            18000 + options.node_id > 65535)
+        {
+            throw std::invalid_argument(
+                "--client-port is required for this node_id");
+        }
         options.client_port = 18000 + options.node_id;
     }
 
