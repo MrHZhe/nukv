@@ -1,4 +1,5 @@
 #include "client.pb.h"
+#include "raft.pb.h"
 #include "nukv/storage/rocks_kv_store.hpp"
 
 #include <arpa/inet.h>
@@ -487,7 +488,8 @@ public:
 
     void VerifyPersistedData(
         const std::string& expected_value,
-        const std::string& large_value) const
+        const std::string& large_value,
+        const std::string& snapshot_large_value) const
     {
         for (const NodeProcess& node : nodes_)
         {
@@ -510,12 +512,59 @@ public:
                     stored_large_value.value() == large_value,
                 "node " + std::to_string(node.id) +
                     " does not contain the replicated large value");
+            const auto stored_snapshot_large_value =
+                store.Get("integration/snapshot-large");
+            Require(
+                stored_snapshot_large_value.has_value() &&
+                    stored_snapshot_large_value.value().size() == 384U * 1024U &&
+                    stored_snapshot_large_value.value() == snapshot_large_value,
+                "node " + std::to_string(node.id) +
+                    " does not contain the multi-chunk snapshot value");
 
             const auto catchup_marker = store.Get("integration/catchup-marker");
             Require(
                 catchup_marker.has_value() && catchup_marker.value() == "committed",
                 "node " + std::to_string(node.id) +
                     " did not catch up after restart");
+
+            const auto snapshot_value = store.Get("integration/snapshot-0");
+            Require(
+                snapshot_value.has_value() && snapshot_value.value() == "value-0",
+                "node " + std::to_string(node.id) +
+                    " did not install the Raft snapshot state");
+            const auto snapshot_tail = store.Get("integration/snapshot-tail");
+            Require(
+                snapshot_tail.has_value() && snapshot_tail.value() == "tail",
+                "node " + std::to_string(node.id) +
+                    " does not contain the post-snapshot log entry");
+
+            const auto snapshot = store.LoadSnapshot();
+            Require(
+                snapshot.has_value(),
+                "node " + std::to_string(node.id) +
+                    " does not have a persisted Raft snapshot");
+            nukv::proto::SnapshotMetadata snapshot_metadata;
+            Require(
+                snapshot_metadata.ParseFromString(snapshot->first),
+                "node " + std::to_string(node.id) +
+                    " has invalid persisted snapshot metadata");
+
+            nukv::RocksKVStore metadata_store(
+                (node.data_directory / "raft_meta").string());
+            const std::uint64_t suffix_index =
+                snapshot_metadata.last_included_index() + 1;
+            const auto suffix = metadata_store.Get(
+                "__raft/log/" + std::to_string(suffix_index));
+            Require(
+                suffix.has_value(),
+                "node " + std::to_string(node.id) +
+                    " lost the log suffix after snapshot restart");
+            nukv::proto::RaftLogEntry suffix_entry;
+            Require(
+                suffix_entry.ParseFromString(suffix.value()) &&
+                    suffix_entry.index() == suffix_index,
+                "node " + std::to_string(node.id) +
+                    " has an invalid persisted log suffix");
         }
     }
 
@@ -680,6 +729,15 @@ void RunTest(Cluster& cluster)
         "integration/large");
     ExpectStatus(response, nukv::proto::ClientResponse::STATUS_OK, "large get");
     Require(response.value() == large_value, "large get returned the wrong value");
+    const std::string snapshot_large_value(384U * 1024U, 'S');
+    ExpectStatus(
+        cluster.Request(
+            first_leader,
+            nukv::proto::ClientRequest::OPERATION_PUT,
+            "integration/snapshot-large",
+            snapshot_large_value),
+        nukv::proto::ClientResponse::STATUS_OK,
+        "multi-chunk snapshot value put");
 
     std::cout << "[4/6] Stopping the leader and waiting for failover\n";
     cluster.StopAbruptly(first_leader);
@@ -715,7 +773,7 @@ void RunTest(Cluster& cluster)
         nukv::proto::ClientResponse::STATUS_OK,
         "put after leader failover");
 
-    std::cout << "[5/6] Restarting nodes and checking log catch-up\n";
+    std::cout << "[5/6] Restarting nodes and checking snapshot catch-up\n";
     cluster.Start(first_leader);
     const int other_follower = 6 - first_leader - second_leader;
     std::this_thread::sleep_for(2s);
@@ -723,6 +781,17 @@ void RunTest(Cluster& cluster)
 
     const int catchup_leader =
         cluster.WaitForLeader({first_leader, second_leader});
+    for (int index = 0; index < 10; ++index)
+    {
+        ExpectStatus(
+            cluster.Request(
+                catchup_leader,
+                nukv::proto::ClientRequest::OPERATION_PUT,
+                "integration/snapshot-" + std::to_string(index),
+                "value-" + std::to_string(index)),
+            nukv::proto::ClientResponse::STATUS_OK,
+            "put for snapshot catch-up");
+    }
     ExpectStatus(
         cluster.Request(
             catchup_leader,
@@ -731,6 +800,14 @@ void RunTest(Cluster& cluster)
             "committed"),
         nukv::proto::ClientResponse::STATUS_OK,
         "put with restarted node in the quorum");
+    ExpectStatus(
+        cluster.Request(
+            catchup_leader,
+            nukv::proto::ClientRequest::OPERATION_PUT,
+            "integration/snapshot-tail",
+            "tail"),
+        nukv::proto::ClientResponse::STATUS_OK,
+        "put after the snapshot boundary");
 
     cluster.Start(other_follower);
     const int final_leader = cluster.WaitForLeader({1, 2, 3});
@@ -743,9 +820,17 @@ void RunTest(Cluster& cluster)
         "get catch-up marker after follower restart");
     std::this_thread::sleep_for(3s);
 
+    std::cout << "      Restarting the snapshot follower to verify log-tail recovery\n";
+    cluster.StopAbruptly(other_follower);
+    cluster.Start(other_follower);
+    std::this_thread::sleep_for(2s);
+
     std::cout << "[6/6] Stopping cluster and checking every RocksDB replica\n";
     cluster.StopAll();
-    cluster.VerifyPersistedData("after-failover", large_value);
+    cluster.VerifyPersistedData(
+        "after-failover",
+        large_value,
+        snapshot_large_value);
 }
 }
 

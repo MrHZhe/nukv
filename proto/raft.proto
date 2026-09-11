@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package nukv.proto;
+
+message RaftLogEntry {
+  uint64 index = 1;
+  uint64 term = 2;
+  bytes command = 3;
+}
+
+message RequestVoteRequest {
+  uint64 term = 1;
+  uint64 candidate_id = 2;
+  uint64 last_log_index = 3;
+  uint64 last_log_term = 4;
+}
+
+message RequestVoteResponse {
+  uint64 term = 1;
+  bool vote_granted = 2;
+  uint64 responder_id = 3;
+}
+
+message AppendEntriesRequest {
+  uint64 term = 1;
+  uint64 leader_id = 2;
+  uint64 prev_log_index = 3;
+  uint64 prev_log_term = 4;
+  repeated RaftLogEntry entries = 5;
+  uint64 leader_commit = 6;
+}
+
+message AppendEntriesResponse {
+  uint64 term = 1;
+  bool success = 2;
+  uint64 match_index = 3;
+  uint64 responder_id = 4;
+}
+
+message SnapshotMetadata {
+  uint64 last_included_index = 1;
+  uint64 last_included_term = 2;
+}
+
+message SnapshotEntry {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+message SnapshotState {
+  repeated SnapshotEntry entries = 1;
+}
+
+message InstallSnapshotRequest {
+  uint64 term = 1;
+  uint64 leader_id = 2;
+  uint64 last_included_index = 3;
+  uint64 last_included_term = 4;
+  uint64 offset = 5;
+  bytes data = 6;
+  bool done = 7;
+}
+
+message InstallSnapshotResponse {
+  uint64 term = 1;
+  bool success = 2;
+  uint64 responder_id = 3;
+  uint64 next_offset = 4;
+}
+
+message RaftRpc {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    REQUEST_VOTE = 1;
+    REQUEST_VOTE_RESPONSE = 2;
+    APPEND_ENTRIES = 3;
+    APPEND_ENTRIES_RESPONSE = 4;
+    IDENTIFY = 5;
+    INSTALL_SNAPSHOT = 6;
+    INSTALL_SNAPSHOT_RESPONSE = 7;
+  }
+
+  Type type = 1;
+  uint64 request_id = 2;
+  uint64 sender_id = 3;
+  bytes payload = 4;
+}
